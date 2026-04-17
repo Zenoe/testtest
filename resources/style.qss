@@ -1,0 +1,417 @@
+/* ── Global reset ─────────────────────────────────────────────────────────── */
+* {
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    font-size: 13px;
+    font-weight: 400;
+    color: #1A1A1A;
+}
+
+QMainWindow, QWidget {
+    background-color: #F0F2F5;
+}
+
+QMenu {
+    background-color: white;
+    border: 1px solid #ccc;
+    /*border-radius: 4px;*/
+    padding: 4px;
+}
+
+QMenu::item {
+    padding: 6px 20px;
+    /* border-radius: 4px;*/
+}
+
+QMenu::item:selected {
+    background-color: #e6fdff;
+}
+
+/* ── Navigation sidebar ───────────────────────────────────────────────────── */
+NavigationWidget {
+    background-color: #FFFFFF;
+    border-right: 1px solid #E4E6EB;
+}
+
+NavItem {
+    border-radius: 8px;
+    padding: 8px;
+    color: #666;
+}
+NavItem:hover   { background: #F0F0F0; }
+NavItem[active="true"] {
+    background: #EBF2FF;
+    color: #2468F2;
+}
+
+/* ── Card panel ── */
+#ServerConfigCard {
+    background: #FFFFFF;
+    border-radius: 12px;
+    border: 1px solid #E0E0E0;
+}
+
+#CardTitle {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1A1A1A;
+    margin-bottom: 8px;
+}
+
+/* ── Form inputs ── */
+QLineEdit, QComboBox {
+    height: 40px;
+    border: 1px solid #DCDCDC;
+    border-radius: 6px;
+    padding: 0 12px;
+    background: #FAFAFA;
+    color: #333;
+}
+QLineEdit:focus, QComboBox:focus {
+    border-color: #2468F2;
+    background: #FFFFFF;
+    outline: none;
+}
+#RequiredField[invalid="true"] {
+    border-color: #FF4D4F;
+}
+
+/* ── Buttons ── */
+QPushButton {
+    height: 40px;
+    border-radius: 6px;
+    border: 1px solid #DCDCDC;
+    background: #FFFFFF;
+    color: #333;
+    padding: 0 16px;
+}
+QPushButton:hover   { background: #F5F5F5; }
+QPushButton:pressed { background: #EBEBEB; }
+QPushButton:disabled { color: #BFBFBF; border-color: #E8E8E8; }
+
+#PrimaryButton {
+    background: #2468F2;
+    color: #FFFFFF;
+    border: none;
+}
+#PrimaryButton:hover   { background: #1E55D0; }
+#PrimaryButton:pressed { background: #1848B8; }
+#PrimaryButton:disabled { background: #C8D8F9; }
+
+/* ── Status / error labels ── */
+#StatusLabel[ok="true"]  { color: #52C41A; }
+#StatusLabel[ok="false"] { color: #FF4D4F; }
+#ErrorLabel { color: #FF4D4F; font-size: 12px; }
+
+/* ── Login background panel ── */
+#LoginBg {
+    border-right: 1px solid #E8E8E8;
+}
+
+/* ── App grid tiles ── */
+AppItemWidget, #AppTile {
+    background: transparent;
+    border-radius: 8px;
+}
+#AppTileHover {
+    background: rgba(36, 104, 242, 0.08);
+    border-radius: 8px;
+}
+
+
+
+/* ── Login / ServerConfig shared background ───────────────────────────────── */
+#LoginBg {
+    background-color: #D6E4FF;   /* fallback if image fails to load */
+}
+
+/* ── Floating form panel ──────────────────────────────────────────────────── */
+#LoginFormPanel {
+    background-color: rgba(255, 255, 255, 0.96);
+    border-left: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* ── Typography ───────────────────────────────────────────────────────────── */
+
+/* Page / card title — large, bold */
+#LoginTitle {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0A0A0A;
+    letter-spacing: 0.2px;
+}
+
+/* Muted subtitle below the title */
+#LoginSubtitle {
+    font-size: 13px;
+    font-weight: 400;
+    color: #8C8C8C;
+}
+
+/* Navigation item labels */
+NavItem QLabel {
+    font-size: 11px;
+    font-weight: 400;
+    color: #595959;
+}
+
+/* Section headings inside the app grid or future pages */
+.SectionHeading {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1A1A1A;
+}
+
+/* App tile label */
+#AppTileLabel {
+    font-size: 12px;
+    font-weight: 400;
+    color: #333333;
+}
+
+/* ── Form inputs ──────────────────────────────────────────────────────────── */
+QLineEdit,
+QComboBox {
+    height: 42px;
+    border: 1.5px solid #D9D9D9;
+    border-radius: 6px;
+    padding: 0 12px;
+    background: #FFFFFF;
+    font-size: 13px;
+    color: #1A1A1A;
+    selection-background-color: #BAD7FF;
+}
+
+QLineEdit:focus,
+QComboBox:focus {
+    border-color: #2468F2;
+    background: #FFFFFF;
+    outline: none;
+}
+
+QLineEdit:hover:!focus,
+QComboBox:hover:!focus {
+    border-color: #AAAAAA;
+}
+
+QLineEdit[readOnly="true"] {
+    background: #F5F5F5;
+    color: #8C8C8C;
+}
+
+QLineEdit::placeholder {
+    color: #BFBFBF;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 28px;
+}
+
+QComboBox::down-arrow {
+    image: url(:/icons/chevron_down.svg);
+    width: 12px;
+    height: 12px;
+}
+
+/* ── Field validation hint ────────────────────────────────────────────────── */
+#FieldHint {
+    font-size: 11px;
+    font-weight: 400;
+    color: #FF4D4F;
+    margin-top: -8px;   /* pull up under the field it describes */
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+
+/* Base — all buttons share this foundation */
+QPushButton {
+    height: 42px;
+    border-radius: 6px;
+    border: 1.5px solid #D9D9D9;    /* visible border — addresses the original issue */
+    background: #FFFFFF;
+    color: #333333;
+    font-size: 14px;
+    font-weight: 500;               /* medium weight so button labels stand out */
+    padding: 0 20px;
+    min-width: 80px;
+}
+
+QPushButton:hover {
+    border-color: #2468F2;
+    color: #2468F2;
+    background: #F0F5FF;
+}
+
+QPushButton:pressed {
+    background: #D6E4FF;
+    border-color: #1848B8;
+    color: #1848B8;
+}
+
+QPushButton:disabled {
+    border-color: #E8E8E8;
+    background: #FAFAFA;
+    color: #BFBFBF;
+}
+
+/* Primary — filled blue, used for the main action */
+#PrimaryButton {
+    background: #2468F2;
+    border: 1.5px solid #1E55D0;    /* slightly darker border gives depth */
+    color: #FFFFFF;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#PrimaryButton:hover {
+    background: #1E55D0;
+    border-color: #1848B8;
+    color: #FFFFFF;
+}
+
+#PrimaryButton:pressed {
+    background: #1848B8;
+    border-color: #1337A0;
+    color: #FFFFFF;
+}
+
+#PrimaryButton:disabled {
+    background: #BAD7FF;
+    border-color: #BAD7FF;
+    color: #FFFFFF;
+}
+
+/* Secondary — outlined, used for test/cancel actions */
+#SecondaryButton {
+    background: #FFFFFF;
+    border: 1.5px solid #2468F2;
+    color: #2468F2;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+#SecondaryButton:hover {
+    background: #F0F5FF;
+    border-color: #1E55D0;
+    color: #1E55D0;
+}
+
+#SecondaryButton:pressed {
+    background: #D6E4FF;
+    border-color: #1848B8;
+    color: #1848B8;
+}
+
+#SecondaryButton:disabled {
+    border-color: #D9D9D9;
+    color: #BFBFBF;
+    background: #FAFAFA;
+}
+
+QCheckBox {
+    font-size: 13px;
+    font-weight: 400;
+    color: #595959;
+    spacing: 6px;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid #D9D9D9;
+    border-radius: 3px;
+    background: #FFFFFF;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #2468F2;
+}
+
+QCheckBox::indicator:checked {
+    background: #2468F2;
+    border-color: #2468F2;
+    image: url(:/checkmark.svg);
+}
+
+/* ── Status / error labels ────────────────────────────────────────────────── */
+#StatusLabel[ok="true"] {
+    font-size: 12px;
+    font-weight: 500;
+    color: #52C41A;
+}
+
+#StatusLabel[ok="false"] {
+    font-size: 12px;
+    font-weight: 500;
+    color: #FF4D4F;
+}
+
+#ErrorLabel {
+    font-size: 12px;
+    font-weight: 400;
+    color: #FF4D4F;
+}
+
+/* ── Spinner / progress bar ───────────────────────────────────────────────── */
+#LoginSpinner,
+#AppGridLoadingBar {
+    border: none;
+    background: #E6EEFF;
+}
+
+#LoginSpinner::chunk,
+#AppGridLoadingBar::chunk {
+    background: #2468F2;
+    border-radius: 2px;
+}
+
+/* ── Scroll area ──────────────────────────────────────────────────────────── */
+QScrollArea,
+#AppGridScroll {
+    background: transparent;
+    border: none;
+}
+
+QScrollBar:vertical {
+    width: 6px;
+    background: transparent;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    background: #D9D9D9;
+    border-radius: 3px;
+    min-height: 32px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #AAAAAA;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+/* ── App grid ─────────────────────────────────────────────────────────────── */
+#AppGridContainer {
+    background: transparent;
+}
+
+AppItemWidget {
+    background: transparent;
+    border-radius: 8px;
+    border: 1.5px solid transparent;  /* reserve space so hover border doesn't shift layout */
+}
+
+AppItemWidget[hovered="true"] {
+    background: rgba(36, 104, 242, 0.07);
+    border: 1.5px solid rgba(36, 104, 242, 0.20);
+}
+
+/* Empty state */
+#EmptyLabel {
+    font-size: 14px;
+    font-weight: 400;
+    color: #BFBFBF;
+}

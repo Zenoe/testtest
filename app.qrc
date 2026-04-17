@@ -1,0 +1,12 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/">
+        <file alias="style.qss">resources/style.qss</file>
+        <file alias="login_bg.png">resources/images/login_bg.png</file>
+        <file alias="avatar.svg">resources/icons/avatar.svg</file>
+        <file alias="security.svg">resources/icons/security.svg</file>
+        <file alias="tools.svg">resources/icons/tools.svg</file>
+        <file alias="store.svg">resources/icons/store.svg</file>
+        <file alias="checkmark.svg">resources/icons/checkmark.svg</file>
+    </qresource>
+</RCC>
