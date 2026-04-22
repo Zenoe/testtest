@@ -32,6 +32,8 @@ public:
     template<typename T>
     T get(const std::string& key, const T& defaultValue);
 
+    template<typename T>
+    std::optional<T> get(const std::string& key);
     // Setters
     template<typename T>
     void set(const std::string& key, const T& value);

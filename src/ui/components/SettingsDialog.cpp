@@ -83,7 +83,7 @@ QWidget* SettingsDialog::createServerPage() {
 
     // 🔥 从配置加载
     ipEdit->setText(QString::fromStdString(
-        ConfigManager::instance().get<std::string>("server.ip", "127.0.0.1")
+        ConfigManager::instance().get<std::string>("server.host", "127.0.0.1")
     ));
 
     portEdit->setValue(
@@ -92,14 +92,14 @@ QWidget* SettingsDialog::createServerPage() {
 
     // 🔥 自动保存（实时）
     connect(ipEdit, &QLineEdit::textChanged, [](const QString& text) {
-        ConfigManager::instance().set("server.ip", text.toStdString());
+        ConfigManager::instance().set("server.host", text.toStdString());
         });
 
     connect(portEdit, QOverload<int>::of(&QSpinBox::valueChanged), [](int val) {
         ConfigManager::instance().set("server.port", val);
         });
 
-    form->addRow("服务器 IP:", ipEdit);
+    form->addRow("服务器地址:", ipEdit);
     form->addRow("端口:", portEdit);
 
     layout->addWidget(title);

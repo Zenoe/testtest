@@ -100,3 +100,73 @@ void NetworkManager::logout(const QString& token) {
         reply->deleteLater();
     });
 }
+void NetworkManager::get(const QUrl& url, std::function<void(QNetworkReply*)> callback) {
+        QNetworkRequest request(url);
+        // Add default headers here (e.g., User-Agent, Auth tokens)
+        request.setRawHeader("Accept", "application/json");
+
+        QNetworkReply* reply = m_nam->get(request);
+        connect(reply, &QNetworkReply::finished, [reply, callback]() {
+            callback(reply);
+            reply->deleteLater();
+        });
+    }
+
+void NetworkManager::fetchCaptcha(const QString& url)
+{
+    if (url.isEmpty()) {
+        emit captchaFetched(false, {}, {}, false, "URL未配置");
+        return;
+    }
+
+    get(url, [this](QNetworkReply* reply) {
+        reply->deleteLater();   // 防止内存泄漏
+
+        if (reply->error() != QNetworkReply::NoError) {
+            emit captchaFetched(false, {}, {}, false, reply->errorString());
+            return;
+        }
+
+        QByteArray responseData = reply->readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(responseData);
+
+        if (doc.isNull() || !doc.isObject()) {
+            emit captchaFetched(false, {}, {}, false, "返回数据不是有效的JSON");
+            return;
+        }
+
+        QJsonObject obj = doc.object();
+        int code = obj.value("code").toInt();
+
+        if (code != 200) {
+            QString msg = obj.value("msg").toString("未知错误");
+            emit captchaFetched(false, {}, {}, false, msg);
+            return;
+        }
+
+        QString imgBase64 = obj.value("img").toString();
+        QString uuid = obj.value("uuid").toString();
+        bool    captchaEnabled = obj.value("captchaEnabled").toBool(false);
+
+        emit captchaFetched(true, imgBase64, uuid, captchaEnabled, "");
+        });
+}
+
+//void NetworkManager::fetchCaptcha(const QString& url, std::function<void(bool success, const QString& imgBase64, const QString& uuid, QString errStr)> callback) {
+//
+//        NetworkManager::instance().get(url, [callback](QNetworkReply* reply) {
+//            if (reply->error() != QNetworkReply::NoError) {
+//				callback(false, {}, {}, reply->errorString());
+//                return;
+//            }
+//
+//            QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+//            QJsonObject obj = doc.object();
+//            
+//            if (obj.value("code").toInt() != 200) {
+//				callback(false, {}, {}, obj.value("msg").toString("Unknown Error"));
+//            } else {
+//				callback(true, obj.value("img").toString(), obj.value("uuid").toString(), "");
+//            }
+//        });
+//    }

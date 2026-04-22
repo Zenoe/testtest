@@ -137,20 +137,29 @@ json* ConfigManager::getJsonNode(const std::string& key, bool create) {
 //
 //    return current;
 //}
-
 template<typename T>
-T ConfigManager::get(const std::string& key, const T& defaultValue) {
+std::optional<T> ConfigManager::get(const std::string& key)
+{
     std::lock_guard<std::mutex> lock(m_mutex);
 
     json* node = getJsonNode(key, false);
     if (!node || node->is_null())
-        return defaultValue;
+        return std::nullopt;
 
     try {
         return node->get<T>();
     } catch (...) {
-        return defaultValue;
+        return std::nullopt;
     }
+}
+
+template<typename T>
+T ConfigManager::get(const std::string& key, const T& defaultValue)
+{
+    if (auto opt = get<T>(key))   // calls the optional version
+        return *opt;
+
+    return defaultValue;
 }
 
 template<typename T>
@@ -184,7 +193,7 @@ nlohmann::json ConfigManager::getSection(const std::string& key) {
     }
     return nlohmann::json::object(); // Return empty object if missing
 }
-// Explicit template instantiations (important for cpp split)
+// Explicit template instantiations (for cpp split)
 template int ConfigManager::get<int>(const std::string&, const int&);
 template std::string ConfigManager::get<std::string>(const std::string&, const std::string&);
 template bool ConfigManager::get<bool>(const std::string&, const bool&);

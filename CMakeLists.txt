@@ -18,6 +18,7 @@ qt_add_executable(Revelation
     src/ui/navigation/NavigationWidget.cpp
     src/ui/navigation/NavItem.cpp
     src/ui/pages/ServerConfigWidget.cpp
+    src/ui/pages/LoginWidget.h
     src/ui/pages/LoginWidget.cpp
     src/ui/pages/AppGridWidget.cpp
     src/ui/components/AppItemWidget.cpp
@@ -29,8 +30,11 @@ qt_add_executable(Revelation
     src/utils/logger.cpp
     src/utils/ConfigManager.h
     src/utils/ConfigManager.cpp
+    src/utils/stringutil.h
     src/ui/components/SettingsDialog.cpp
     src/ui/components/AvatarWidget.cpp
+    src/ui/components/ClickableLabel.h
+    src/ui/components/ClickableLabel.cpp
     app.qrc
 )
 
