@@ -147,10 +147,18 @@ std::optional<T> ConfigManager::get(const std::string& key)
         return std::nullopt;
 
     try {
-        return node->get<T>();
-    } catch (...) {
-        return std::nullopt;
-    }
+		// without this, if the stored value is a number but we ask for a string, it will throw instead of converting
+		if constexpr (std::is_same_v<T, std::string>) {
+			if (node->is_string())
+				return node->get<std::string>();
+			if (node->is_number())
+				return std::to_string(node->get<int>());
+		}
+		return node->get<T>();
+	}
+	catch (...) {
+		return std::nullopt;
+	}
 }
 
 template<typename T>

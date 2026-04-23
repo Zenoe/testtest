@@ -41,11 +41,16 @@ void loadSettings()
 
 int main(int argc, char* argv[]) {
     Application app(argc, argv);
+    QCoreApplication::setOrganizationName("XY");
+    // QCoreApplication::setOrganizationDomain("XY.com");
+    QCoreApplication::setApplicationName("Revelation");
+    QCoreApplication::setApplicationVersion("1.0.0");
     loadSettings();
     setup_logging();
     spdlog::debug("main start");
     app.initialise();               // singletons + stylesheet + server pre-load
 
+	qDebug() << "Application started with config:" << QString::fromStdString(ConfigManager::instance().getSection("server").dump());
     MainWindow w;
     w.show();
 	spdlog::shutdown(); // Ensure all logs are flushed before exiting

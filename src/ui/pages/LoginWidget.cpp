@@ -2,9 +2,11 @@
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QKeyEvent>
-
+#include <QTimer>
 #include "backend/NetworkManager.h"
 #include "utils/ConfigManager.h"
+#include "backend/SessionManager.h"
+#include "secure/SecureStorageFactory.h"
 
 LoginWidget::LoginWidget(QWidget* parent)
     : QWidget(parent)
@@ -46,6 +48,7 @@ void LoginWidget::setupUi() {
     m_userEdit->setObjectName("LoginField");
     m_userEdit->setFixedHeight(42);
     m_userEdit->setClearButtonEnabled(true);
+    m_userEdit->setText("cc");
 
     // Password
     m_passEdit = new QLineEdit(m_formPanel);
@@ -54,6 +57,7 @@ void LoginWidget::setupUi() {
     m_passEdit->setFixedHeight(42);
     m_passEdit->setEchoMode(QLineEdit::Password);
     m_passEdit->setClearButtonEnabled(true);
+	m_passEdit->setText("1qaz@WSX"); // for testing, should be removed in production
 
     // ── Captcha Row (图片 + 刷新按钮) ──
 
@@ -85,7 +89,8 @@ void LoginWidget::setupUi() {
     m_errorLabel = new QLabel(m_formPanel);
     m_errorLabel->setObjectName("ErrorLabel");
     m_errorLabel->setWordWrap(true);
-    m_errorLabel->setVisible(false);
+	//m_errorLabel->setVisible(false);
+    //m_errorLabel->setFixedHeight(20);
 
     // Login button
     m_loginBtn = new QPushButton("登 录", m_formPanel);
@@ -93,26 +98,37 @@ void LoginWidget::setupUi() {
     m_loginBtn->setFixedHeight(42);
     m_loginBtn->setEnabled(false);
 
+    m_loginBtn->installEventFilter(this);
+
     // Options row
     auto* optRow = new QHBoxLayout();
     optRow->setContentsMargins(0, 0, 0, 0);
-    m_autoLoginChk = new QCheckBox("自动登录", m_formPanel);
+    m_rememberMe = new QCheckBox("记住我", m_formPanel);
     m_forgotLabel  = new QLabel(
         R"(<a href="#" style="color:#2468F2;text-decoration:none;">忘记密码</a>)",
         m_formPanel);
     m_forgotLabel->setOpenExternalLinks(false);
     m_forgotLabel->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
-    optRow->addWidget(m_autoLoginChk);
+    optRow->addWidget(m_rememberMe);
     optRow->addStretch();
     optRow->addWidget(m_forgotLabel);
 
-    // Spinner
-    m_spinner = new QProgressBar(m_formPanel);
+    m_spinner = new QProgressBar(m_loginBtn); 
+	// Set up the spinner as a floating bar at the bottom of the login button
     m_spinner->setObjectName("LoginSpinner");
     m_spinner->setFixedHeight(3);
     m_spinner->setRange(0, 0);
     m_spinner->setTextVisible(false);
-    m_spinner->setVisible(false);
+    m_spinner->setStyleSheet(R"(
+QProgressBar {
+    border: none;
+    background: transparent;
+}
+QProgressBar::chunk {
+    background-color: #ffffff;   // 白色 loading 条
+}
+)");
+    m_spinner->hide();
 
     vl->addWidget(m_titleLabel);
     vl->addWidget(subtitleLabel);
@@ -122,10 +138,9 @@ void LoginWidget::setupUi() {
     vl->addLayout(captchaRow);
 
 
-    vl->addWidget(m_errorLabel);
     vl->addWidget(m_loginBtn);
     vl->addLayout(optRow);
-    vl->addWidget(m_spinner);
+    vl->addWidget(m_errorLabel);
 }
 
 void LoginWidget::showEvent(QShowEvent* event) {
@@ -135,13 +150,19 @@ void LoginWidget::showEvent(QShowEvent* event) {
         ConfigManager::instance().get<std::string>("server.host").value_or("")
     );
     int port = ConfigManager::instance().get<int>("server.port", 0);
-    //QString port = QString::fromStdString(ConfigManager::instance().get<std::string>("server.port").value_or(""));
     QString captchaImageUrl = host + ":" + QString::number(port);
     QString endpoint = QString::fromStdString(ConfigManager::instance().get<std::string>("server.captcha_endpoint").value_or("/revelation/captchaImage"));
 
     QString fullHost = host;
     if (port != 0) fullHost += ":" + QString::number(port);
     m_captchaBaseUrl = fullHost + endpoint;
+
+    QString loginEndpoint = QString::fromStdString(
+                                                   ConfigManager::instance().get<std::string>("server.login_endpoint")
+                                                   .value_or("/revelation/user/login")
+                                                  );
+
+    m_loginUrl = fullHost + loginEndpoint;
 
     // use http get to request from endpoint to get captcha image and display it in the form
     // the returned json like {"msg":"操作成功","img":"base64code","code":200,"captchaEnabled":true,"uuid":"e6dd647df0244ce48d9cca9e62ac5c0f"}
@@ -153,28 +174,32 @@ void LoginWidget::showEvent(QShowEvent* event) {
     // It's a good habit to check if the window is actually being shown 
     // (not just a state change)
     if (!event->spontaneous()) {
-        refreshCaptcha();
-   //     NetworkManager::instance().fetchCaptcha(m_captchaBaseUrl, [this](bool success, const QString& imgBase64, const QString& uuid, QString errStr) {
-   //         if (success) {
-   //             m_captchaUuid = uuid;
-   //             m_captchaEnabled = errStr.isEmpty();
-   //             if (m_captchaEnabled) {
-   //                 // Decode base64 and set pixmap
-   //                 QByteArray imgData = QByteArray::fromBase64(imgBase64.toUtf8());
-   //                 QPixmap pix;
-   //                 pix.loadFromData(imgData);
-   //                 m_captchaImageLabel->setPixmap(pix);
-   //                 // Show captcha UI elements
-   //                 m_captchaImageLabel->setVisible(true);
-   //                 m_captchaEdit->setVisible(true);
-   //             } else {
-   //                 // Hide captcha UI elements if not needed
-   //                 m_captchaImageLabel->setVisible(false);
-   //                 m_captchaEdit->setVisible(false);
-   //             }
-   //         } else {
-   //             showError("验证码加载失败，请检查网络连接。");
-   //         }
+      // 初始化加载动画计时器
+      m_loadingTimer = new QTimer(this);
+      connect(m_loadingTimer, &QTimer::timeout, this, &LoginWidget::updateLoadingDots);
+
+      refreshCaptcha();
+      //     NetworkManager::instance().fetchCaptcha(m_captchaBaseUrl, [this](bool success, const QString& imgBase64, const QString& uuid, QString errStr) {
+      //         if (success) {
+      //             m_captchaUuid = uuid;
+      //             m_captchaEnabled = errStr.isEmpty();
+      //             if (m_captchaEnabled) {
+      //                 // Decode base64 and set pixmap
+      //                 QByteArray imgData = QByteArray::fromBase64(imgBase64.toUtf8());
+      //                 QPixmap pix;
+      //                 pix.loadFromData(imgData);
+      //                 m_captchaImageLabel->setPixmap(pix);
+      //                 // Show captcha UI elements
+      //                 m_captchaImageLabel->setVisible(true);
+      //                 m_captchaEdit->setVisible(true);
+      //             } else {
+      //                 // Hide captcha UI elements if not needed
+      //                 m_captchaImageLabel->setVisible(false);
+      //                 m_captchaEdit->setVisible(false);
+      //             }
+      //         } else {
+      //             showError("验证码加载失败，请检查网络连接。");
+      //         }
 			//});
     }
 }
@@ -192,32 +217,45 @@ void LoginWidget::resizeEvent(QResizeEvent* event)
         m_formPanel->setGeometry(
             width() - m_formPanel->width(), 0,
             m_formPanel->width(), height());
+
+	//qDebug() << "LoginBtn resized: " << m_loginBtn->width() << "x" << m_loginBtn->height();
+    // can not catch the final size of the login button here
+	//if (m_spinner && m_loginBtn) {
+	//	int h = 3;
+	//	m_spinner->setGeometry(
+	//		0,
+	//		m_loginBtn->height() - h,
+	//		m_loginBtn->width(),
+	//		h
+	//	);
+	//}
 }
 
 void LoginWidget::setupConnections() {
-    connect(m_userEdit, &QLineEdit::textChanged,
-            this, &LoginWidget::onFieldsChanged);
-    connect(m_passEdit, &QLineEdit::textChanged,
-            this, &LoginWidget::onFieldsChanged);
-    connect(m_loginBtn, &QPushButton::clicked,
-            this, &LoginWidget::onLoginClicked);
+	connect(m_userEdit, &QLineEdit::textChanged, this, &LoginWidget::onFieldsChanged);
+	connect(m_passEdit, &QLineEdit::textChanged, this, &LoginWidget::onFieldsChanged);
+	connect(m_loginBtn, &QPushButton::clicked, this, &LoginWidget::onLoginClicked);
 
-    // Allow Enter key in password field to submit
-    connect(m_passEdit, &QLineEdit::returnPressed,
-            this, &LoginWidget::onLoginClicked);
-    connect(m_userEdit, &QLineEdit::returnPressed,
-            m_passEdit, QOverload<>::of(&QWidget::setFocus));
+	// Allow Enter key in password field to submit
+	connect(m_passEdit, &QLineEdit::returnPressed, this, &LoginWidget::onLoginClicked);
+	connect(m_userEdit, &QLineEdit::returnPressed, m_passEdit, QOverload<>::of(&QWidget::setFocus));
 
-    connect(m_captchaEdit, &QLineEdit::textChanged, this, &LoginWidget::onFieldsChanged);
+	connect(m_captchaEdit, &QLineEdit::textChanged, this, &LoginWidget::onFieldsChanged);
 
-    connect(m_captchaImageLabel, &ClickableLabel::clicked, this, &LoginWidget::refreshCaptcha);
+	//connect(m_captchaImageLabel, &ClickableLabel::clicked, this, &LoginWidget::refreshCaptcha);
+	connect(m_captchaImageLabel, &ClickableLabel::clicked,
+		this, [this]() {
+			this->showError({});
+			this->refreshCaptcha();
+		});
 
-    // 接收 NetworkManager 的验证码结果
-    connect(&NetworkManager::instance(), &NetworkManager::captchaFetched,
-        this, &LoginWidget::onCaptchaFetched);
-
-    //connect(m_captchaImageLabel, &ClickableLabel::clicked,
+	// 接收 NetworkManager 的验证码结果
+	connect(&NetworkManager::instance(), &NetworkManager::captchaFetched, this, &LoginWidget::onCaptchaFetched);
+	//connect(m_captchaImageLabel, &ClickableLabel::clicked,
     //    &NetworkManager::instance(), &NetworkManager::fetchCaptcha);
+    connect(m_captchaEdit, &QLineEdit::textChanged, this, &LoginWidget::onFieldsChanged);
+    connect(&NetworkManager::instance(), &NetworkManager::captchaFetched, this, &LoginWidget::onCaptchaFetched);
+    connect(&NetworkManager::instance(), &NetworkManager::loginFinished, this, &LoginWidget::onLoginFinished);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -227,12 +265,19 @@ void LoginWidget::setLoading(bool on) {
     m_userEdit->setEnabled(!on);
     m_passEdit->setEnabled(!on);
     if (m_captchaEdit) m_captchaEdit->setEnabled(!on);
-    m_spinner->setVisible(on);
+    if (on) {
+        m_loginBtn->setText("");
+        m_spinner->show();
+    }
+    else {
+        m_loginBtn->setText("登 录");
+        m_spinner->hide();
+    }
 }
 
 void LoginWidget::showError(const QString& msg) {
     m_errorLabel->setText(msg);
-    m_errorLabel->setVisible(!msg.isEmpty());
+    // m_errorLabel->setVisible(!msg.isEmpty());
 }
 
 void LoginWidget::clearFields() {
@@ -242,50 +287,89 @@ void LoginWidget::clearFields() {
     showError({});
     setLoading(false);
     m_userEdit->setFocus();
+    refreshCaptcha();
 }
 
 // ── Private slots ─────────────────────────────────────────────────────────────
-
-void LoginWidget::onLoginClicked() {
+void LoginWidget::onLoginClicked()
+{
     const QString user = m_userEdit->text().trimmed();
     const QString pass = m_passEdit->text();
     const QString captcha = m_captchaEdit ? m_captchaEdit->text().trimmed() : QString();
 
     if (user.isEmpty() || pass.isEmpty()) return;
+
     if (m_captchaEnabled && captcha.isEmpty()) {
         showError("请输入验证码");
         return;
     }
 
+    //showError({});
+    setLoading(true);
+
+    NetworkManager::instance().login(
+        m_loginUrl,
+        user,
+        pass,
+        captcha,
+        m_captchaUuid
+    );
+}
+
+void LoginWidget::onLoginFinished(bool success, const QString& token, const QString& errorMsg) {
+    setLoading(false);
+
+    if (!success) {
+        showError(errorMsg.isEmpty() ? "登录失败" : errorMsg);
+        refreshCaptcha();
+        return;
+    }
+
+    // 登录成功
     showError({});
-    emit loginRequested(user, pass, captcha, m_captchaUuid);
+
+    // TODO
+    qDebug() << "Login success, token =" << token;
+
+	auto storage = SecureStorageFactory::create();
+	QString err;
+
+	if (m_rememberMe->isChecked()) {
+		storage->save(qApp->applicationDisplayName(), m_userEdit->text().trimmed(), token, err);
+	}
+	else {
+		storage->remove(qApp->applicationDisplayName(), err);
+	}
+
+	if (!err.isEmpty()) {
+		qWarning() << err;
+	}
+    SessionManager::instance().setSession({ m_userEdit->text().trimmed(), token, m_rememberMe->isChecked() });
+
+	emit loginSuccess(token);
 }
 
 void LoginWidget::onFieldsChanged() {
-    const bool filled = !m_userEdit->text().trimmed().isEmpty()
-                     && !m_passEdit->text().isEmpty();
-    m_loginBtn->setEnabled(filled);
-}
-
-void LoginWidget::refreshCaptcha()
-{
-    if (!m_captchaBaseUrl.isEmpty()) {
-        NetworkManager::instance().fetchCaptcha(m_captchaBaseUrl);
-    }
+	const bool filled = !m_userEdit->text().trimmed().isEmpty()
+		&& !m_passEdit->text().isEmpty()
+		&& !m_captchaEdit->text().trimmed().isEmpty();
+	m_loginBtn->setEnabled(filled);
 }
 
 void LoginWidget::onCaptchaFetched(bool success,
-    const QString& imgBase64,
-    const QString& uuid,
-    bool captchaEnabled,
-    const QString& errorMsg)
+                                   const QString& imgBase64,
+                                   const QString& uuid,
+                                   bool captchaEnabled,
+                                   const QString& errorMsg)
 {
+    stopCaptchaLoading();                     // 无论成功失败都停止加载动画
+
     if (!success) {
         showError(errorMsg.isEmpty() ? "获取验证码失败" : errorMsg);
         return;
     }
 
-    m_captchaUuid = uuid;
+    m_captchaUuid    = uuid;
     m_captchaEnabled = captchaEnabled;
 
     if (!captchaEnabled || imgBase64.isEmpty()) {
@@ -295,7 +379,7 @@ void LoginWidget::onCaptchaFetched(bool success,
         return;
     }
 
-    // 处理可能的 data:image/... 前缀
+    // 处理 data: 前缀
     QString cleanBase64 = imgBase64;
     if (cleanBase64.startsWith("data:image")) {
         int commaPos = cleanBase64.indexOf(',');
@@ -313,18 +397,63 @@ void LoginWidget::onCaptchaFetched(bool success,
         m_captchaEdit->setVisible(true);
         m_captchaEdit->clear();
 
-        showError({});
+        //showError({});
         onFieldsChanged();
-    }
-    else {
+    } else {
         showError("验证码图片解码失败");
     }
 }
 
+void LoginWidget::refreshCaptcha()
+{
+    if (m_isFetchingCaptcha || m_captchaBaseUrl.isEmpty()) return;
+
+    startCaptchaLoading();
+    NetworkManager::instance().fetchCaptcha(m_captchaBaseUrl);
+}
+
+void LoginWidget::startCaptchaLoading()
+{
+    m_isFetchingCaptcha = true;
+    m_captchaImageLabel->setEnabled(false);
+    m_captchaImageLabel->setCursor(Qt::WaitCursor);
+
+    m_dotsCount = 0;
+    m_loadingTimer->start(300);           // 每300ms更新一次点
+    m_captchaImageLabel->setText("加载中");
+    m_captchaImageLabel->setPixmap(QPixmap());   // 清空旧图片
+}
+
+void LoginWidget::stopCaptchaLoading()
+{
+    m_isFetchingCaptcha = false;
+    m_loadingTimer->stop();
+    m_captchaImageLabel->setEnabled(true);
+    m_captchaImageLabel->setCursor(Qt::PointingHandCursor);
+    m_captchaImageLabel->setText("");
+}
+
+void LoginWidget::updateLoadingDots()
+{
+    m_dotsCount = (m_dotsCount + 1) % 4;
+    QString dots = QString(".").repeated(m_dotsCount);
+    m_captchaImageLabel->setText("加载中" + dots);
+}
+
+bool LoginWidget::eventFilter(QObject* obj, QEvent* event) {
+    if (obj == m_loginBtn && event->type() == QEvent::Resize) {
+        int h = 3;
+        m_spinner->setGeometry(
+            0,
+            m_loginBtn->height() - h,
+            m_loginBtn->width(),
+            h
+        );
+    }
+    return QWidget::eventFilter(obj, event);
+}
 // void LoginWidget::setupUi()
 // {
-//     // No layout for the main widget itself – we will manually position children.
-//     // The background label becomes the "canvas".
 //     m_bgLabel = new QLabel(this);
 //     m_bgLabel->setObjectName("LoginBg");
 //     m_bgLabel->setScaledContents(true);
@@ -349,59 +478,7 @@ void LoginWidget::onCaptchaFetched(bool success,
 
 //     // Username
 //     m_userEdit = new QLineEdit(rightPanel);
-//     m_userEdit->setPlaceholderText("请输入用户名");
-//     m_userEdit->setObjectName("LoginField");
-//     m_userEdit->setFixedHeight(40);
-//     m_userEdit->setClearButtonEnabled(true);
-
-//     // Password
-//     m_passEdit = new QLineEdit(rightPanel);
-//     m_passEdit->setPlaceholderText("请输入密码");
-//     m_passEdit->setObjectName("LoginField");
-//     m_passEdit->setFixedHeight(40);
-//     m_passEdit->setEchoMode(QLineEdit::Password);
-//     m_passEdit->setClearButtonEnabled(true);
-
-//     // Error label
-//     m_errorLabel = new QLabel(rightPanel);
-//     m_errorLabel->setObjectName("ErrorLabel");
-//     m_errorLabel->setWordWrap(true);
-//     m_errorLabel->setVisible(false);
-
-//     // Login button
-//     m_loginBtn = new QPushButton("登录", rightPanel);
-//     m_loginBtn->setObjectName("PrimaryButton");
-//     m_loginBtn->setFixedHeight(40);
-//     m_loginBtn->setEnabled(false);
-
-//     // Options row
-//     auto* optRow = new QHBoxLayout();
-//     m_autoLoginChk = new QCheckBox("自动登录", rightPanel);
-//     m_forgotLabel = new QLabel(R"(<a href="#" style="color:#2468F2;text-decoration:none;">忘记密码</a>)", rightPanel);
-//     m_forgotLabel->setOpenExternalLinks(false);
-//     m_forgotLabel->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
-//     optRow->addWidget(m_autoLoginChk);
-//     optRow->addStretch();
-//     optRow->addWidget(m_forgotLabel);
-
-//     // Spinner
-//     m_spinner = new QProgressBar(rightPanel);
-//     m_spinner->setObjectName("LoginSpinner");
-//     m_spinner->setFixedHeight(3);
-//     m_spinner->setRange(0, 0);
-//     m_spinner->setTextVisible(false);
-//     m_spinner->setVisible(false);
-
-//     vl->addWidget(m_titleLabel);
-//     vl->addSpacing(24);
-//     vl->addWidget(m_userEdit);
-//     vl->addWidget(m_passEdit);
-//     vl->addWidget(m_errorLabel);
-//     vl->addWidget(m_loginBtn);
-//     vl->addLayout(optRow);
-//     vl->addWidget(m_spinner);
-//     // --- End of inner layout ---
-
+//     ...
 //     // Since we removed the QHBoxLayout, we must override resizeEvent
 //     // to keep the background stretched and the panel positioned right.
 // }
@@ -422,91 +499,4 @@ void LoginWidget::onCaptchaFetched(bool success,
 //     }
 // }
 
-
-// void LoginWidget::setupUi() {
-//     auto* hLayout = new QHBoxLayout(this);
-//     hLayout->setContentsMargins(0, 0, 0, 0);
-//     hLayout->setSpacing(0);
-
-//     // ── Left: background image panel ──────────────────────────────────────────
-//     m_bgLabel = new QLabel(this);
-//     m_bgLabel->setObjectName("LoginBg");
-//     m_bgLabel->setScaledContents(true);
-//     m_bgLabel->setPixmap(QPixmap(":/login_bg.png"));
-//     m_bgLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-//     hLayout->addWidget(m_bgLabel, 3);   // ratio 3 : 2
-
-//     // ── Right: form panel ─────────────────────────────────────────────────────
-//     auto* rightPanel = new QWidget(this);
-//     rightPanel->setObjectName("LoginFormPanel");
-//     rightPanel->setFixedWidth(360);
-
-//     auto* vl = new QVBoxLayout(rightPanel);
-//     vl->setContentsMargins(40, 0, 40, 0);
-//     vl->setSpacing(12);
-//     vl->setAlignment(Qt::AlignCenter);
-
-//     // Title
-//     m_titleLabel = new QLabel("账号登录", rightPanel);
-//     m_titleLabel->setObjectName("LoginTitle");
-//     m_titleLabel->setAlignment(Qt::AlignLeft);
-
-//     // Username
-//     m_userEdit = new QLineEdit(rightPanel);
-//     m_userEdit->setPlaceholderText("请输入用户名");
-//     m_userEdit->setObjectName("LoginField");
-//     m_userEdit->setFixedHeight(40);
-//     m_userEdit->setClearButtonEnabled(true);
-
-//     // Password
-//     m_passEdit = new QLineEdit(rightPanel);
-//     m_passEdit->setPlaceholderText("请输入密码");
-//     m_passEdit->setObjectName("LoginField");
-//     m_passEdit->setFixedHeight(40);
-//     m_passEdit->setEchoMode(QLineEdit::Password);
-//     m_passEdit->setClearButtonEnabled(true);
-
-//     // Error label (hidden until needed)
-//     m_errorLabel = new QLabel(rightPanel);
-//     m_errorLabel->setObjectName("ErrorLabel");
-//     m_errorLabel->setWordWrap(true);
-//     m_errorLabel->setVisible(false);
-
-//     // Login button
-//     m_loginBtn = new QPushButton("登录", rightPanel);
-//     m_loginBtn->setObjectName("PrimaryButton");
-//     m_loginBtn->setFixedHeight(40);
-//     m_loginBtn->setEnabled(false);      // disabled until both fields have text
-
-//     // Options row: auto-login + forgot password
-//     auto* optRow = new QHBoxLayout();
-//     m_autoLoginChk = new QCheckBox("自动登录", rightPanel);
-//     m_forgotLabel  = new QLabel(
-//         R"(<a href="#" style="color:#2468F2;text-decoration:none;">忘记密码</a>)",
-//         rightPanel);
-//     m_forgotLabel->setOpenExternalLinks(false);
-//     m_forgotLabel->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
-//     optRow->addWidget(m_autoLoginChk);
-//     optRow->addStretch();
-//     optRow->addWidget(m_forgotLabel);
-
-//     // Spinner (indeterminate progress bar, hidden by default)
-//     m_spinner = new QProgressBar(rightPanel);
-//     m_spinner->setObjectName("LoginSpinner");
-//     m_spinner->setFixedHeight(3);
-//     m_spinner->setRange(0, 0);          // indeterminate mode
-//     m_spinner->setTextVisible(false);
-//     m_spinner->setVisible(false);
-
-//     vl->addWidget(m_titleLabel);
-//     vl->addSpacing(24);
-//     vl->addWidget(m_userEdit);
-//     vl->addWidget(m_passEdit);
-//     vl->addWidget(m_errorLabel);
-//     vl->addWidget(m_loginBtn);
-//     vl->addLayout(optRow);
-//     vl->addWidget(m_spinner);
-
-//     hLayout->addWidget(rightPanel, 2);
-// }
 

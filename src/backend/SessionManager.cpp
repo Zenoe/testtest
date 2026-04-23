@@ -22,7 +22,7 @@ SessionManager::SessionManager(QObject* parent)
 
 void SessionManager::setSession(const UserSession& session) {
     m_session = session;
-    if (session.autoLogin)
+    if (session.rememberMe)
         persistAutoLogin();
     else
         clearPersistedAutoLogin();
@@ -39,8 +39,8 @@ bool SessionManager::isLoggedIn() const {
     return m_session.isValid();
 }
 
-bool SessionManager::hasAutoLogin() const {
-    return m_session.autoLogin && m_session.isValid();
+bool SessionManager::rememberMe() const {
+    return m_session.rememberMe && m_session.isValid();
 }
 
 QString SessionManager::token() const {
@@ -82,7 +82,7 @@ void SessionManager::loadAutoLogin() {
     if (autoLogin) {
         m_session.token     = s.value(kToken).toString();
         m_session.username  = s.value(kUsername).toString();
-        m_session.autoLogin = true;
+        m_session.rememberMe = true;
     }
     s.endGroup();
 }

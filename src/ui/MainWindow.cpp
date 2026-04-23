@@ -3,7 +3,9 @@
 #include "utils/ConfigManager.h"
 #include "backend/NetworkManager.h"
 #include "backend/SessionManager.h"
+#include "secure/SecureStorageFactory.h"
 #include <QHBoxLayout>
+#include <QApplication>
 #include <QWidget>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
@@ -47,10 +49,8 @@ void MainWindow::setupConnections() {
             this, &MainWindow::onTestConnection);
 
     // LoginWidget signals
-    connect(m_login, &LoginWidget::loginRequested,
-            this, &MainWindow::onLoginRequested);
-    connect(m_login, &LoginWidget::logoutRequested,
-            this, &MainWindow::onLogout);
+    connect(m_login, &LoginWidget::loginSuccess, this, &MainWindow::onLoginSuccess);
+    //connect(m_login, &LoginWidget::logoutRequested, this, &MainWindow::onLogout);
 
     // AppGridWidget
     connect(m_appGrid, &AppGridWidget::logoutRequested,
@@ -60,14 +60,13 @@ void MainWindow::setupConnections() {
     auto& net = NetworkManager::instance();
     connect(&net, &NetworkManager::connectivityResult,
             m_serverCfg, &ServerConfigWidget::onTestResult);
-    connect(&net, &NetworkManager::loginResult,
-            this, &MainWindow::onLoginResult);
     connect(&net, &NetworkManager::appListReady,
             m_appGrid, &AppGridWidget::onAppsReceived);
 
     // Navigation
     connect(m_nav, &NavigationWidget::itemSelected,
             this, &MainWindow::onNavItemSelected);
+    connect(qApp, &QApplication::aboutToQuit, this, &MainWindow::onAppQuit);
 }
 
 void MainWindow::determineInitialState() {
@@ -79,12 +78,13 @@ void MainWindow::determineInitialState() {
         NetworkManager::instance().setServer(ServerConfig::fromJson(serverCfg));
         // Check for saved auto-login token
         auto& session = SessionManager::instance();
-        if (session.hasAutoLogin()) {
-            switchToPage(2);
-            NetworkManager::instance().fetchAppList(session.token());
-        } else {
-            switchToPage(1);
-        }
+		switchToPage(1);
+        //if (session.hasAutoLogin()) {
+        //    switchToPage(2);
+        //    NetworkManager::instance().fetchAppList(session.token());
+        //} else {
+        //    switchToPage(1);
+        //}
     }
 }
 
@@ -122,18 +122,9 @@ void MainWindow::onTestConnection() {
     NetworkManager::instance().testConnectivity();
 }
 
-void MainWindow::onLoginRequested(const QString& user, const QString& pass) {
-    m_login->setLoading(true);
-    NetworkManager::instance().login(user, pass);
-}
-
-void MainWindow::onLoginResult(bool ok, const UserSession& session,
-                               const QString& err) {
-    m_login->setLoading(false);
-    if (!ok) { m_login->showError(err); return; }
-    SessionManager::instance().setSession(session);
+void MainWindow::onLoginSuccess(const QString& token) {
     switchToPage(2);
-    NetworkManager::instance().fetchAppList(session.token);
+    //NetworkManager::instance().fetchAppList(session.token);
 }
 
 void MainWindow::onLogout() {
@@ -155,4 +146,25 @@ void MainWindow::onNavItemSelected(const QString& id) {
     // "security", "tools", "store" — reserved for future stacked pages.
     // Update the sidebar highlight regardless so the UI feels responsive.
     m_nav->setActiveItem(id);
+}
+
+void MainWindow::onAppQuit()
+{
+    // 检查是否已登录
+    if (!SessionManager::instance().isLoggedIn()) {
+        return;
+    }
+
+    auto storage = SecureStorageFactory::create();
+    QString err;
+
+    if (!SessionManager::instance().rememberMe()) {
+        // 用户没有选择"记住我"，退出时清理存储的数据
+        storage->remove(qApp->applicationDisplayName(), err);
+    }
+    // 如果用户选择了"记住我"，可以保留数据以便下次自动登录
+
+    SessionManager::instance().clearSession();
+
+    qDebug() << "Session cleared on exit";
 }

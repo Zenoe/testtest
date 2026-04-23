@@ -6,10 +6,30 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_definitions(-DQT_NO_DEBUG_OUTPUT)
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS
     Core Widgets Network)
 
 find_package(spdlog CONFIG REQUIRED)
+
+set(COMMON_SOURCES
+    src/secure/ISecureStorage.h
+    src/secure/SecureStorageFactory.cpp
+)
+
+if (WIN32)
+    set(PLATFORM_SOURCES
+        src/secure/WinCredentialStorage.cpp
+        src/secure/WinCredentialStorage.h
+    )
+elseif (APPLE)
+    set(PLATFORM_SOURCES
+        #MacKeychainStorage.mm   # Objective-C++
+    )
+endif()
 
 qt_add_executable(Revelation
     src/main.cpp
@@ -35,6 +55,9 @@ qt_add_executable(Revelation
     src/ui/components/AvatarWidget.cpp
     src/ui/components/ClickableLabel.h
     src/ui/components/ClickableLabel.cpp
+    src/models/UserSession.h
+    ${COMMON_SOURCES}
+    ${PLATFORM_SOURCES}
     app.qrc
 )
 

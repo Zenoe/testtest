@@ -18,6 +18,9 @@ AvatarWidget::AvatarWidget(QWidget* parent) : QWidget(parent)
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->show();
         });
+    // m_menu->addAction("Logout", qApp, &QApplication::quit);
+    QAction* logoutAction = m_menu->addAction("Logout");
+    // todo
     m_menu->addSeparator();
     m_menu->addAction("Quit", qApp, &QApplication::quit);
 

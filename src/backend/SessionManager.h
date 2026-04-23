@@ -12,7 +12,7 @@ public:
     void clearSession();
 
     bool          isLoggedIn()  const;
-    bool          hasAutoLogin() const;
+    bool          rememberMe() const;
     QString       token()       const;
     QString       username()    const;
     UserSession   session()     const;

@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QTimer>
 
 NetworkManager& NetworkManager::instance() {
     static NetworkManager inst;
@@ -47,25 +48,72 @@ void NetworkManager::testConnectivity() {
     });
 }
 
-void NetworkManager::login(const QString& user, const QString& pass) {
-    QJsonObject body{{ "username", user }, { "password", pass }};
-    QNetworkRequest req(baseUrl("/api/auth/login"));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+void NetworkManager::login(const QString& url, const QString& username,
+                           const QString& password, const QString& code, const QString& uuid) {
+    if (url.isEmpty()) {
+        emit loginFinished(false, "", "登录URL为空");
+        return;
+    }
 
-    auto* reply = m_nam->post(req, QJsonDocument(body).toJson());
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    QUrl qurl(url);
+    QNetworkRequest request(qurl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    // 构造 JSON
+    QJsonObject json;
+    json["username"] = username;
+    json["password"] = password;
+    json["code"]     = code;
+    json["uuid"]     = uuid;
+
+    QByteArray postData = QJsonDocument(json).toJson();
+
+    QNetworkReply* reply = m_nam->post(request, postData);
+
+    // 超时控制（复用你 captcha 的写法）
+    QTimer* timeoutTimer = new QTimer(this);
+    timeoutTimer->setSingleShot(true);
+    timeoutTimer->start(10000);
+
+    connect(timeoutTimer, &QTimer::timeout, this, [this, reply, timeoutTimer]() {
+        if (reply && reply->isRunning()) {
+            reply->abort();
+            emit loginFinished(false, {}, "登录请求超时（10秒）");
+        }
+        timeoutTimer->deleteLater();
+        if (reply) reply->deleteLater();
+    });
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, timeoutTimer]() {
+        timeoutTimer->stop();
+        timeoutTimer->deleteLater();
+        reply->deleteLater();
+
         if (reply->error() != QNetworkReply::NoError) {
-            emit loginResult(false, {}, reply->errorString());
-            reply->deleteLater();
+            emit loginFinished(false, {}, reply->errorString());
             return;
         }
-        auto doc = QJsonDocument::fromJson(reply->readAll()).object();
-        UserSession s;
-        s.token    = doc["token"].toString();
-        s.username = doc["username"].toString();
-        emit loginResult(!s.token.isEmpty(), s,
-                         s.token.isEmpty() ? "Invalid credentials" : "");
-        reply->deleteLater();
+
+        QByteArray data = reply->readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+
+        if (!doc.isObject()) {
+            emit loginFinished(false, {}, "返回数据格式错误");
+            return;
+        }
+
+        QJsonObject obj = doc.object();
+        int code = obj.value("code").toInt();
+
+        if (code != 200) {
+            QString msg = obj.value("msg").toString("登录失败");
+            emit loginFinished(false, {}, msg);
+            return;
+        }
+
+        QString token = obj.value("token").toString();
+
+        emit loginFinished(true, token, "");
     });
 }
 
@@ -115,12 +163,36 @@ void NetworkManager::get(const QUrl& url, std::function<void(QNetworkReply*)> ca
 void NetworkManager::fetchCaptcha(const QString& url)
 {
     if (url.isEmpty()) {
-        emit captchaFetched(false, {}, {}, false, "URLδ����");
+        emit captchaFetched(false, {}, {}, false, "验证码URL配置为空");
         return;
     }
+    //QUrl qurl(url);
+    //QNetworkRequest request(qurl);
+    //QNetworkReply* reply = m_nam->get(request);
+    QNetworkReply* reply = m_nam->get(QNetworkRequest(QUrl(url)));
+    //QNetworkRequest request(QUrl(url));
+    //QNetworkReply* reply = m_nam->get(request);
 
-    get(url, [this](QNetworkReply* reply) {
-        reply->deleteLater();   // ��ֹ�ڴ�й©
+    QTimer* timeoutTimer = new QTimer(this);
+    timeoutTimer->setSingleShot(true);
+    timeoutTimer->start(10000);   // 10秒超时，可自行修改
+
+    // 超时处理
+    connect(timeoutTimer, &QTimer::timeout, this, [this, reply, timeoutTimer]() {
+        if (reply && reply->isRunning()) {
+            reply->abort();
+            emit captchaFetched(false, {}, {}, false, "请求验证码超时（10秒）");
+        }
+        timeoutTimer->deleteLater();
+        if (reply) reply->deleteLater();
+    });
+
+    // 正常完成
+    connect(reply, &QNetworkReply::finished, this, [this, reply, timeoutTimer]() {
+        timeoutTimer->stop();
+        timeoutTimer->deleteLater();
+
+        reply->deleteLater();
 
         if (reply->error() != QNetworkReply::NoError) {
             emit captchaFetched(false, {}, {}, false, reply->errorString());
@@ -131,7 +203,7 @@ void NetworkManager::fetchCaptcha(const QString& url)
         QJsonDocument doc = QJsonDocument::fromJson(responseData);
 
         if (doc.isNull() || !doc.isObject()) {
-            emit captchaFetched(false, {}, {}, false, "�������ݲ�����Ч��JSON");
+            emit captchaFetched(false, {}, {}, false, "返回数据不是有效的JSON");
             return;
         }
 
@@ -139,18 +211,57 @@ void NetworkManager::fetchCaptcha(const QString& url)
         int code = obj.value("code").toInt();
 
         if (code != 200) {
-            QString msg = obj.value("msg").toString("δ֪����");
+            QString msg = obj.value("msg").toString("未知错误");
             emit captchaFetched(false, {}, {}, false, msg);
             return;
         }
 
-        QString imgBase64 = obj.value("img").toString();
-        QString uuid = obj.value("uuid").toString();
+        QString imgBase64     = obj.value("img").toString();
+        QString uuid          = obj.value("uuid").toString();
         bool    captchaEnabled = obj.value("captchaEnabled").toBool(false);
 
         emit captchaFetched(true, imgBase64, uuid, captchaEnabled, "");
-        });
+    });
 }
+// void NetworkManager::fetchCaptcha(const QString& url)
+// {
+//     if (url.isEmpty()) {
+//         emit captchaFetched(false, {}, {}, false, "URLÎ´ÅäÖÃ");
+//         return;
+//     }
+
+//     get(url, [this](QNetworkReply* reply) {
+//         reply->deleteLater();   // ·ÀÖ¹ÄÚ´æÐ¹Â©
+
+//         if (reply->error() != QNetworkReply::NoError) {
+//             emit captchaFetched(false, {}, {}, false, reply->errorString());
+//             return;
+//         }
+
+//         QByteArray responseData = reply->readAll();
+//         QJsonDocument doc = QJsonDocument::fromJson(responseData);
+
+//         if (doc.isNull() || !doc.isObject()) {
+//             emit captchaFetched(false, {}, {}, false, "·µ»ØÊý¾Ý²»ÊÇÓÐÐ§µÄJSON");
+//             return;
+//         }
+
+//         QJsonObject obj = doc.object();
+//         int code = obj.value("code").toInt();
+
+//         if (code != 200) {
+//             QString msg = obj.value("msg").toString("Î´Öª´íÎó");
+//             emit captchaFetched(false, {}, {}, false, msg);
+//             return;
+//         }
+
+//         QString imgBase64 = obj.value("img").toString();
+//         QString uuid = obj.value("uuid").toString();
+//         bool    captchaEnabled = obj.value("captchaEnabled").toBool(false);
+
+//         emit captchaFetched(true, imgBase64, uuid, captchaEnabled, "");
+//         });
+// }
 
 //void NetworkManager::fetchCaptcha(const QString& url, std::function<void(bool success, const QString& imgBase64, const QString& uuid, QString errStr)> callback) {
 //

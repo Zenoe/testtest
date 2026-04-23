@@ -16,16 +16,18 @@ public:
 
     // All calls are async; results arrive via signals
     void testConnectivity();
-    void login(const QString& username, const QString& password);
     void fetchAppList(const QString& token);
     void logout(const QString& token);          // optional server-side invalidation
     void fetchCaptcha(const QString& url);
     //void fetchCaptcha(const QString& url, std::function<void(bool success, const QString& imgBase64, const QString& uuid, QString errStr)> callback);
 
 	void get(const QUrl& url, std::function<void(QNetworkReply*)> callback);
+    void login(const QString& url, const QString& username, const QString& password, const QString& code, const QString& uuid);
 signals:
     void connectivityResult(bool ok, const QString& message);
-    void loginResult(bool ok, const UserSession& session, const QString& errorMsg);
+  void loginFinished(bool success,
+                     const QString& token,
+                     const QString& errorMsg);
     void appListReady(const QList<AppEntry>& apps);
     void logoutFinished();
     void networkError(const QString& message);

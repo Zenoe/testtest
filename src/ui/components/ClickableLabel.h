@@ -13,5 +13,5 @@ signals:
     void clicked();
 
 protected:
-    void mousePressEvent(QMouseEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override; // 'override' helps the compiler catch typos
 };

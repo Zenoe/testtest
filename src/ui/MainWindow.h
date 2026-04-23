@@ -16,9 +16,10 @@ public:
 private slots:
     void onConfigSaved(const ServerConfig& cfg);
     void onTestConnection();
-    void onLoginRequested(const QString& user, const QString& pass);
-    void onLoginResult(bool ok, const UserSession& session, const QString& err);
+    void onLoginSuccess(const QString& token);
+    //void onLoginResult(bool ok, const UserSession& session, const QString& err);
     void onLogout();
+    void onAppQuit();
     void onNavItemSelected(const QString& id);
 
 private:

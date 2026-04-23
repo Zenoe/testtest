@@ -19,14 +19,16 @@ public:
 
 protected:
     void showEvent(QShowEvent* event) override;
-    void resizeEvent(QResizeEvent *event);
+    void resizeEvent(QResizeEvent *event) override;
+    bool eventFilter(QObject* obj, QEvent* event) override;
+
 signals:
     //void loginRequested(const QString& username, const QString& password);
     void loginRequested(const QString& username,
         const QString& password,
         const QString& captchaCode,
         const QString& captchaUuid);
-    void logoutRequested();        // emitted if already-logged-in state needs reset
+    void loginSuccess(const QString token);        // emitted if already-logged-in state needs reset
 
 private slots:
     void onLoginClicked();
@@ -39,6 +41,12 @@ private slots:
         const QString& errorMsg);
 
     void refreshCaptcha();   // 点击图片刷新用
+
+    void startCaptchaLoading();
+    void stopCaptchaLoading();
+    void updateLoadingDots();
+    void onLoginFinished(bool success, const QString& token, const QString& errorMsg);
+
 private:
     void setupUi();
     void setupConnections();
@@ -54,7 +62,7 @@ private:
     QLineEdit*    m_userEdit;
     QLineEdit*    m_passEdit;
     QPushButton*  m_loginBtn;
-    QCheckBox*    m_autoLoginChk;
+    QCheckBox*    m_rememberMe;
     QLabel*       m_forgotLabel;
     QProgressBar* m_spinner;       // indeterminate, shown while authenticating
 
@@ -64,4 +72,9 @@ private:
     QString m_captchaUuid;
     bool    m_captchaEnabled = false;
     QString m_captchaBaseUrl;        // 保存完整验证码接口地址
+    QString m_loginUrl;
+private:
+  bool    m_isFetchingCaptcha = false;   // 防重复点击
+  QTimer* m_loadingTimer      = nullptr;
+  int     m_dotsCount         = 0;
 };
