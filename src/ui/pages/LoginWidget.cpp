@@ -48,7 +48,7 @@ void LoginWidget::setupUi() {
     m_userEdit->setObjectName("LoginField");
     m_userEdit->setFixedHeight(42);
     m_userEdit->setClearButtonEnabled(true);
-    m_userEdit->setText("cc");
+    m_userEdit->setText("lzy");
 
     // Password
     m_passEdit = new QLineEdit(m_formPanel);
@@ -145,24 +145,6 @@ QProgressBar::chunk {
 
 void LoginWidget::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
-
-    QString host = QString::fromStdString(
-        ConfigManager::instance().get<std::string>("server.host").value_or("")
-    );
-    int port = ConfigManager::instance().get<int>("server.port", 0);
-    QString captchaImageUrl = host + ":" + QString::number(port);
-    QString endpoint = QString::fromStdString(ConfigManager::instance().get<std::string>("server.captcha_endpoint").value_or("/revelation/captchaImage"));
-
-    QString fullHost = host;
-    if (port != 0) fullHost += ":" + QString::number(port);
-    m_captchaBaseUrl = fullHost + endpoint;
-
-    QString loginEndpoint = QString::fromStdString(
-                                                   ConfigManager::instance().get<std::string>("server.login_endpoint")
-                                                   .value_or("/revelation/user/login")
-                                                  );
-
-    m_loginUrl = fullHost + loginEndpoint;
 
     // use http get to request from endpoint to get captcha image and display it in the form
     // the returned json like {"msg":"操作成功","img":"base64code","code":200,"captchaEnabled":true,"uuid":"e6dd647df0244ce48d9cca9e62ac5c0f"}
@@ -307,8 +289,12 @@ void LoginWidget::onLoginClicked()
     //showError({});
     setLoading(true);
 
+    QString loginUrl = getServerHost() + QString::fromStdString(
+        ConfigManager::instance().get<std::string>("server.login_endpoint")
+        .value_or("/revelation/user/login")
+	);
     NetworkManager::instance().login(
-        m_loginUrl,
+        loginUrl,
         user,
         pass,
         captcha,
@@ -406,10 +392,14 @@ void LoginWidget::onCaptchaFetched(bool success,
 
 void LoginWidget::refreshCaptcha()
 {
-    if (m_isFetchingCaptcha || m_captchaBaseUrl.isEmpty()) return;
+    if (m_isFetchingCaptcha) return;
 
     startCaptchaLoading();
-    NetworkManager::instance().fetchCaptcha(m_captchaBaseUrl);
+    QString captchaUrl = getServerHost() + QString::fromStdString(
+        ConfigManager::instance().get<std::string>("server.captcha_endpoint")
+        .value_or("/revelation/captchaImage")
+	);
+    NetworkManager::instance().fetchCaptcha(captchaUrl);
 }
 
 void LoginWidget::startCaptchaLoading()
@@ -452,6 +442,32 @@ bool LoginWidget::eventFilter(QObject* obj, QEvent* event) {
     }
     return QWidget::eventFilter(obj, event);
 }
+
+QString LoginWidget::getServerHost()  {
+    auto& cm = ConfigManager::instance();
+
+    QString host = QString::fromStdString(
+        cm.get<std::string>("server.host").value_or("")
+    );
+
+    if(host.isEmpty()) {
+        showError("请配置服务器地址");
+        return {};
+	}
+    int port = cm.get<int>("server.port", 0);
+
+    if (port != 0) {
+        host += ":" + QString::number(port);
+    }
+    if(!host.startsWith("http://") && ! host.startsWith("https://")) {
+		host = "http://" + host;
+    }
+
+    SessionManager::instance().setServerHost(host);
+    return host;
+
+}
+
 // void LoginWidget::setupUi()
 // {
 //     m_bgLabel = new QLabel(this);

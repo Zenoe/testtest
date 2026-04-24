@@ -7,6 +7,8 @@
 #include <QJsonArray>
 #include <QTimer>
 
+#include "SessionManager.h"
+
 NetworkManager& NetworkManager::instance() {
     static NetworkManager inst;
     return inst;
@@ -48,6 +50,61 @@ void NetworkManager::testConnectivity() {
     });
 }
 
+QNetworkRequest NetworkManager::createRequest(const QString& url)
+{
+    //QNetworkRequest request(QUrl(url));
+    QUrl qurl(url);
+    QNetworkRequest request; // 显式默认构造
+    request.setUrl(qurl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QString token = SessionManager::instance().token();
+
+    if (!token.isEmpty()) {
+        request.setRawHeader("Authorization", QString("Bearer %1").arg(token).toUtf8());
+    }
+
+    return request;
+}
+
+bool NetworkManager::parseStandardReply(QNetworkReply* reply, QJsonObject& outObj, QString& errorMsg)
+{
+    if (reply->error() != QNetworkReply::NoError) {
+        errorMsg = reply->errorString();
+        return false;
+    }
+
+    QByteArray data = reply->readAll();
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+
+    if (!doc.isObject()) {
+        errorMsg = "返回数据格式错误";
+        return false;
+    }
+
+    QJsonObject obj = doc.object();
+    int code = obj.value("code").toInt();
+
+    if (code != 200) {
+        errorMsg = obj.value("msg").toString("请求失败");
+        //  统一处理 token 失效
+        if (code == 401) {
+            handleUnauthorized();
+        }
+
+        return false;
+    }
+
+    outObj = obj;
+    return true;
+}
+
+void NetworkManager::handleUnauthorized()
+{
+    SessionManager::instance().clearSession();
+    //emit unauthorized();
+}
+
 void NetworkManager::login(const QString& url, const QString& username,
                            const QString& password, const QString& code, const QString& uuid) {
     if (url.isEmpty()) {
@@ -55,10 +112,11 @@ void NetworkManager::login(const QString& url, const QString& username,
         return;
     }
 
-    QUrl qurl(url);
-    QNetworkRequest request(qurl);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    //QUrl qurl(url);
+    //QNetworkRequest request(qurl);
+    //request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
+    QNetworkRequest request = createRequest(url);
     // 构造 JSON
     QJsonObject json;
     json["username"] = username;
@@ -89,32 +147,55 @@ void NetworkManager::login(const QString& url, const QString& username,
         timeoutTimer->deleteLater();
         reply->deleteLater();
 
-        if (reply->error() != QNetworkReply::NoError) {
-            emit loginFinished(false, {}, reply->errorString());
+        QJsonObject obj;
+        QString err;
+
+        if (!parseStandardReply(reply, obj, err)) {
+            emit loginFinished(false, {}, err);
+            reply->deleteLater();
             return;
         }
 
-        QByteArray data = reply->readAll();
-        QJsonDocument doc = QJsonDocument::fromJson(data);
+        //if (reply->error() != QNetworkReply::NoError) {
+        //    emit loginFinished(false, {}, reply->errorString());
+        //    return;
+        //}
 
-        if (!doc.isObject()) {
-            emit loginFinished(false, {}, "返回数据格式错误");
-            return;
-        }
+        //QByteArray data = reply->readAll();
+        //QJsonDocument doc = QJsonDocument::fromJson(data);
 
-        QJsonObject obj = doc.object();
-        int code = obj.value("code").toInt();
+        //if (!doc.isObject()) {
+        //    emit loginFinished(false, {}, "返回数据格式错误");
+        //    return;
+        //}
 
-        if (code != 200) {
-            QString msg = obj.value("msg").toString("登录失败");
-            emit loginFinished(false, {}, msg);
-            return;
-        }
+        //QJsonObject obj = doc.object();
+        //int code = obj.value("code").toInt();
+
+        //if (code != 200) {
+        //    QString msg = obj.value("msg").toString("登录失败");
+        //    emit loginFinished(false, {}, msg);
+        //    return;
+        //}
 
         QString token = obj.value("token").toString();
 
         emit loginFinished(true, token, "");
     });
+}
+
+void NetworkManager::logout(const QString& url)
+{
+    QNetworkRequest request = createRequest(url);
+    QNetworkReply* reply = m_nam->post(request, QByteArray());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        QJsonObject obj;
+        QString err;
+        parseStandardReply(reply, obj, err);
+		SessionManager::instance().clearSession();
+        emit logoutFinished();
+        reply->deleteLater();
+        });
 }
 
 void NetworkManager::fetchAppList(const QString& token) {
@@ -138,16 +219,6 @@ void NetworkManager::fetchAppList(const QString& token) {
     });
 }
 
-void NetworkManager::logout(const QString& token) {
-    QNetworkRequest req(baseUrl("/api/auth/logout"));
-    req.setRawHeader("Authorization",
-                     QByteArray("Bearer ") + token.toUtf8());
-    auto* reply = m_nam->post(req, QByteArray());
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
-        emit logoutFinished();
-        reply->deleteLater();
-    });
-}
 void NetworkManager::get(const QUrl& url, std::function<void(QNetworkReply*)> callback) {
         QNetworkRequest request(url);
         // Add default headers here (e.g., User-Agent, Auth tokens)
@@ -166,13 +237,7 @@ void NetworkManager::fetchCaptcha(const QString& url)
         emit captchaFetched(false, {}, {}, false, "验证码URL配置为空");
         return;
     }
-    //QUrl qurl(url);
-    //QNetworkRequest request(qurl);
-    //QNetworkReply* reply = m_nam->get(request);
     QNetworkReply* reply = m_nam->get(QNetworkRequest(QUrl(url)));
-    //QNetworkRequest request(QUrl(url));
-    //QNetworkReply* reply = m_nam->get(request);
-
     QTimer* timeoutTimer = new QTimer(this);
     timeoutTimer->setSingleShot(true);
     timeoutTimer->start(10000);   // 10秒超时，可自行修改

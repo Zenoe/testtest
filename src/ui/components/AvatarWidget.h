@@ -14,6 +14,7 @@ public:
 
 signals:
     void clicked();
+	void logoutRequested();
 
 protected:
     void paintEvent(QPaintEvent*) override;

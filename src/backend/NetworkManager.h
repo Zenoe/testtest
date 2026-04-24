@@ -23,6 +23,10 @@ public:
 
 	void get(const QUrl& url, std::function<void(QNetworkReply*)> callback);
     void login(const QString& url, const QString& username, const QString& password, const QString& code, const QString& uuid);
+    QNetworkRequest createRequest(const QString& url);
+    bool parseStandardReply(QNetworkReply* reply, QJsonObject& outObj, QString& errorMsg);
+    void handleUnauthorized();
+
 signals:
     void connectivityResult(bool ok, const QString& message);
   void loginFinished(bool success,

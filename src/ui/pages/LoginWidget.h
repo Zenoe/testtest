@@ -71,10 +71,10 @@ private:
 
     QString m_captchaUuid;
     bool    m_captchaEnabled = false;
-    QString m_captchaBaseUrl;        // 保存完整验证码接口地址
     QString m_loginUrl;
 private:
-  bool    m_isFetchingCaptcha = false;   // 防重复点击
-  QTimer* m_loadingTimer      = nullptr;
-  int     m_dotsCount         = 0;
+	bool    m_isFetchingCaptcha = false;   // 防重复点击
+	QTimer* m_loadingTimer = nullptr;
+	int     m_dotsCount = 0;
+	QString getServerHost() ;
 };

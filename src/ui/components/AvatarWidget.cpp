@@ -19,8 +19,8 @@ AvatarWidget::AvatarWidget(QWidget* parent) : QWidget(parent)
         dlg->show();
         });
     // m_menu->addAction("Logout", qApp, &QApplication::quit);
-    QAction* logoutAction = m_menu->addAction("Logout");
-    // todo
+    //QAction* logoutAction = m_menu->addAction("Logout", this, &AvatarWidget::logoutRequested);
+	QAction* logoutAction = m_menu->addAction("Logout", this, [this]() { emit logoutRequested(); });
     m_menu->addSeparator();
     m_menu->addAction("Quit", qApp, &QApplication::quit);
 
