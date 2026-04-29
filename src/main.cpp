@@ -53,6 +53,7 @@ int main(int argc, char* argv[]) {
 	qDebug() << "Application started with config:" << QString::fromStdString(ConfigManager::instance().getSection("server").dump());
     MainWindow w;
     w.show();
-	spdlog::shutdown(); // Ensure all logs are flushed before exiting
+	// spdlog::shutdown(); // shutdown before app.exec, cuase spdlog crash in slot functions
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {spdlog::shutdown();});
     return app.exec();
 }

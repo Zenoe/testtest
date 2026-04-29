@@ -51,6 +51,9 @@ QString SessionManager::username() const {
     return m_session.username;
 }
 
+QString SessionManager::vpnConf() const {
+    return m_session.vpnconf;
+}
 UserSession SessionManager::session() const {
     return m_session;
 }

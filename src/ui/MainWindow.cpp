@@ -3,10 +3,16 @@
 #include "utils/ConfigManager.h"
 #include "backend/NetworkManager.h"
 #include "backend/SessionManager.h"
+#include "backend/VpnManager.h"
 #include "secure/SecureStorageFactory.h"
 #include <QHBoxLayout>
 #include <QApplication>
 #include <QWidget>
+#include <QFileInfo>
+#include <QProcess>
+#include <QToolBar>
+#include <QMessageBox>
+#include "utils/logger.h"
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setupUi();
@@ -39,6 +45,86 @@ void MainWindow::setupUi() {
     hLayout->addWidget(m_nav);
     hLayout->addWidget(m_stack);
     setCentralWidget(central);
+
+    addTestButtons();
+}
+void MainWindow::addTestButtons() {
+    spdlog::info("addTestButton");
+    QToolBar* testToolbar = new QToolBar("Test Controls", this);
+    testToolbar->setAllowedAreas(Qt::TopToolBarArea);
+    addToolBar(Qt::TopToolBarArea, testToolbar);
+
+    // Add spacing to push buttons to the right (optional)
+    auto* spacer = new QWidget(this);
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    testToolbar->addWidget(spacer);
+
+    auto* btnVpn = new QPushButton("vpn start", this);
+    btnVpn->setFixedHeight(30);
+    QObject::connect(btnVpn, &QPushButton::clicked, this, [this]() {
+        //m_stack->setCurrentIndex(0);
+        spdlog::info("vpn test");
+        connect(&VpnManager::instance(), &VpnManager::connected,
+            this, [this](const QString&) {
+				spdlog::info("VPN connected successfully");
+            });
+
+        connect(&VpnManager::instance(), &VpnManager::errorOccurred,
+            this, [this](const QString& ctx, const QString& detail) {
+                QMessageBox::critical(this, "VPN Error",
+                    QString("Failed at step [%1]: %2").arg(ctx, detail));
+            });
+
+        const QString confPath = SessionManager::instance().vpnConf();
+        VpnManager::instance().connectVpn(confPath);
+        });
+    testToolbar->addWidget(btnVpn);
+
+    auto* btnServer = new QPushButton("Server Config", this);
+    btnServer->setFixedHeight(30);
+    QObject::connect(btnServer, &QPushButton::clicked, this, [this]() {
+        //m_stack->setCurrentIndex(0);
+        spdlog::info("Switched to Server Config view");
+        });
+    testToolbar->addWidget(btnServer);
+
+    // Test button 2: Switch to Login view
+    auto* btnLogin = new QPushButton("Login", this);
+    btnLogin->setFixedHeight(30);
+    QObject::connect(btnLogin, &QPushButton::clicked, [this]() {
+        m_stack->setCurrentIndex(1);
+        spdlog::info("Switched to Login view");
+        });
+    testToolbar->addWidget(btnLogin);
+
+    // Test button 3: Switch to App Grid view
+    auto* btnAppGrid = new QPushButton("App Grid", this);
+    btnAppGrid->setFixedHeight(30);
+    QObject::connect(btnAppGrid, &QPushButton::clicked, [this]() {
+        m_stack->setCurrentIndex(2);
+        spdlog::info("Switched to App Grid view");
+        });
+    testToolbar->addWidget(btnAppGrid);
+
+    // Test button 4: Simulate server config change (emit signal example)
+    auto* btnSimulate = new QPushButton("Simulate Config", this);
+    btnSimulate->setFixedHeight(30);
+    QObject::connect(btnSimulate, &QPushButton::clicked, [this]() {
+        // Example: Emit a signal if widgets have appropriate signals
+        spdlog::warn("Simulated server configuration change");
+        // You could trigger mock data here
+        });
+    testToolbar->addWidget(btnSimulate);
+
+    // Optional: Add a separator and close button to remove test toolbar
+    testToolbar->addSeparator();
+    auto* btnClose = new QPushButton("✕", this);
+    btnClose->setFixedHeight(30);
+    QObject::connect(btnClose, &QPushButton::clicked, [testToolbar]() {
+        testToolbar->hide();
+        spdlog::info("Test toolbar hidden");
+        });
+    testToolbar->addWidget(btnClose);
 }
 
 void MainWindow::setupConnections() {
@@ -123,13 +209,39 @@ void MainWindow::onTestConnection() {
 }
 
 void MainWindow::onLoginSuccess(const QString& token) {
-    switchToPage(2);
-    //NetworkManager::instance().fetchAppList(session.token);
+    const QString confPath = SessionManager::instance().vpnConf();
+
+    connect(&VpnManager::instance(), &VpnManager::connected,
+            this, [this, token](const QString&) {
+                switchToPage(2);
+                NetworkManager::instance().fetchAppList(token);
+            });
+
+    connect(&VpnManager::instance(), &VpnManager::errorOccurred,
+            this, [this](const QString& ctx, const QString& detail) {
+                QMessageBox::critical(this, "VPN Error",
+                    QString("Failed at step [%1]: %2").arg(ctx, detail));
+            });
+
+    VpnManager::instance().connectVpn(confPath);
+    // switchToPage(2);
+    // NetworkManager::instance().fetchAppList(token);
 }
 
 void MainWindow::onLogout() {
-    SessionManager::instance().clearSession();
-    switchToPage(1);
+  spdlog::info("logout");
+    const QString confPath = SessionManager::instance().vpnConf();
+
+    connect(&VpnManager::instance(), &VpnManager::disconnected,
+            this, [this](const QString&) {
+                SessionManager::instance().clearSession();
+                switchToPage(1);
+            });
+
+    VpnManager::instance().disconnectVpn(confPath);
+
+    // SessionManager::instance().clearSession();
+    // switchToPage(1);
 }
 
 void MainWindow::onNavItemSelected(const QString& id) {

@@ -330,7 +330,10 @@ void LoginWidget::onLoginFinished(bool success, const QString& token, const QStr
 	if (!err.isEmpty()) {
 		qWarning() << err;
 	}
-    SessionManager::instance().setSession({ m_userEdit->text().trimmed(), token, m_rememberMe->isChecked() });
+    // 替换原有的 setSession 调用，显式构造 UserSession 对象
+    SessionManager::instance().setSession(
+        {m_userEdit->text().trimmed(), token, m_rememberMe->isChecked()}
+    );
 
 	emit loginSuccess(token);
 }
@@ -463,7 +466,7 @@ QString LoginWidget::getServerHost()  {
 		host = "http://" + host;
     }
 
-    SessionManager::instance().setServerHost(host);
+    //SessionManager::instance().setServerHost(host);
     return host;
 
 }

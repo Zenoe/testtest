@@ -5,8 +5,15 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/msvc_sink.h> // For Visual Studio Output window
-//#include "ConfigManager.h"
+#include <string>
+#include <string_view>
+
 void setup_logging();
+std::string win32_error_str(unsigned long code);
+//std::string to_utf8(std::wstring_view ws);
+
+// 用函数替代宏（更安全）
+void LOG_WIN32_ERROR(const char* msg);
 
 /* void setup_logging() */
 /* { */

@@ -7,7 +7,6 @@
 #include "ui/pages/LoginWidget.h"
 #include "ui/pages/AppGridWidget.h"
 #include <models/UserSession.h>
-
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -22,6 +21,7 @@ private slots:
     void onAppQuit();
     void onNavItemSelected(const QString& id);
 
+    void addTestButtons();
 private:
     void setupUi();
     void setupConnections();

@@ -15,6 +15,7 @@ public:
     bool          rememberMe() const;
     QString       token()       const;
     QString       username()    const;
+	QString       vpnConf()  const;
     UserSession   session()     const;
 
 signals:
