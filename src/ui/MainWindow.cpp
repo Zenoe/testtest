@@ -62,8 +62,6 @@ void MainWindow::addTestButtons() {
     auto* btnVpn = new QPushButton("vpn start", this);
     btnVpn->setFixedHeight(30);
     QObject::connect(btnVpn, &QPushButton::clicked, this, [this]() {
-        //m_stack->setCurrentIndex(0);
-        spdlog::info("vpn test");
         connect(&VpnManager::instance(), &VpnManager::connected,
             this, [this](const QString&) {
 				spdlog::info("VPN connected successfully");
@@ -80,6 +78,24 @@ void MainWindow::addTestButtons() {
         });
     testToolbar->addWidget(btnVpn);
 
+    auto* btnDisVpn = new QPushButton("vpn stop", this);
+    QObject::connect(btnDisVpn, &QPushButton::clicked, this, [this]() {
+        connect(&VpnManager::instance(), &VpnManager::disconnected,
+            this, [this](const QString&) {
+                // todo stop status thread polling
+				spdlog::info("VPN disconnected");
+            });
+
+        connect(&VpnManager::instance(), &VpnManager::errorOccurred,
+            this, [this](const QString& ctx, const QString& detail) {
+                QMessageBox::critical(this, "VPN Error",
+                    QString("Failed at step [%1]: %2").arg(ctx, detail));
+            });
+
+        const QString confPath = SessionManager::instance().vpnConf();
+        VpnManager::instance().disconnectVpn(confPath);
+        });
+    testToolbar->addWidget(btnDisVpn);
     auto* btnServer = new QPushButton("Server Config", this);
     btnServer->setFixedHeight(30);
     QObject::connect(btnServer, &QPushButton::clicked, this, [this]() {
@@ -136,14 +152,17 @@ void MainWindow::setupConnections() {
 
     // LoginWidget signals
     connect(m_login, &LoginWidget::loginSuccess, this, &MainWindow::onLoginSuccess);
-    //connect(m_login, &LoginWidget::logoutRequested, this, &MainWindow::onLogout);
 
-    // AppGridWidget
-    connect(m_appGrid, &AppGridWidget::logoutRequested,
+    //connect(m_appGrid, &AppGridWidget::logoutRequested,
+    //        this, &MainWindow::onLogout);
+    connect(m_nav, &NavigationWidget::logoutRequested,
             this, &MainWindow::onLogout);
 
     // NetworkManager callbacks
     auto& net = NetworkManager::instance();
+    connect(&net, &NetworkManager::serverError, this, [this](const QString& errMsg) {
+        m_login->showError(errMsg);
+        });
     connect(&net, &NetworkManager::connectivityResult,
             m_serverCfg, &ServerConfigWidget::onTestResult);
     connect(&net, &NetworkManager::appListReady,
@@ -223,25 +242,24 @@ void MainWindow::onLoginSuccess(const QString& token) {
                     QString("Failed at step [%1]: %2").arg(ctx, detail));
             });
 
-    VpnManager::instance().connectVpn(confPath);
+    NetworkManager::instance().fetchVpnConf();
+    // VpnManager::instance().connectVpn(confPath);
     // switchToPage(2);
     // NetworkManager::instance().fetchAppList(token);
 }
 
 void MainWindow::onLogout() {
-  spdlog::info("logout");
+	spdlog::info("logout");
     const QString confPath = SessionManager::instance().vpnConf();
 
     connect(&VpnManager::instance(), &VpnManager::disconnected,
-            this, [this](const QString&) {
-                SessionManager::instance().clearSession();
-                switchToPage(1);
-            });
+        this, [this](const QString&) {
+            //SessionManager::instance().clearSession();
+            switchToPage(1);
+        }, Qt::SingleShotConnection);
 
     VpnManager::instance().disconnectVpn(confPath);
-
-    // SessionManager::instance().clearSession();
-    // switchToPage(1);
+	NetworkManager::instance().logout();
 }
 
 void MainWindow::onNavItemSelected(const QString& id) {

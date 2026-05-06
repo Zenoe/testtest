@@ -15,6 +15,7 @@ public:
 
 signals:
     void itemSelected(const QString& id);
+    void logoutRequested();
 
 private:
     void setupUi();

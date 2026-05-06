@@ -25,18 +25,11 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
-
-#ifndef LOG_WIN32_ERROR
-#  define LOG_WIN32_ERROR(msg) \
-       spdlog::error("[Win32] {} - error={}", (msg), ::GetLastError())
-#endif
+#include "utils/logger.h"
 
 #pragma comment(lib, "ws2_32.lib") 
 namespace Tunnel {
 
-    // ============================================================
-    //  HostAddress
-    // ============================================================
     HostAddress HostAddress::fromIPv4(uint32_t hostOrder) noexcept
     {
         HostAddress a;
@@ -76,9 +69,6 @@ namespace Tunnel {
         return {};
     }
 
-    // ============================================================
-    //  Key
-    // ============================================================
     Key::Key(const std::vector<uint8_t>& bytes)
     {
         if (static_cast<int>(bytes.size()) != KeySize)
@@ -119,17 +109,11 @@ namespace Tunnel {
         return out;
     }
 
-    // ============================================================
-    //  AllowedIP
-    // ============================================================
     std::string AllowedIP::toString() const
     {
         return address.toString() + "/" + std::to_string(cidr);
     }
 
-    // ============================================================
-    //  namespace Driver
-    // ============================================================
     namespace Driver {
 
         namespace {
@@ -233,9 +217,6 @@ namespace Tunnel {
 
         } // anonymous namespace
 
-        // ============================================================
-        //  getDll / getRunningDriverVersion
-        // ============================================================
         const DllFunctions& getDll()
         {
             std::call_once(g_dllOnce, loadDll);
@@ -255,9 +236,6 @@ namespace Tunnel {
                 std::to_string(ver & 0xFF);
         }
 
-        // ============================================================
-        //  Adapter
-        // ============================================================
         Adapter::Adapter(HANDLE h) noexcept
             : m_handle(h)
         {

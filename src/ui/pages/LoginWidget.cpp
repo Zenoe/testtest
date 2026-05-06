@@ -289,12 +289,7 @@ void LoginWidget::onLoginClicked()
     //showError({});
     setLoading(true);
 
-    QString loginUrl = getServerHost() + QString::fromStdString(
-        ConfigManager::instance().get<std::string>("server.login_endpoint")
-        .value_or("/revelation/user/login")
-	);
     NetworkManager::instance().login(
-        loginUrl,
         user,
         pass,
         captcha,
@@ -398,11 +393,12 @@ void LoginWidget::refreshCaptcha()
     if (m_isFetchingCaptcha) return;
 
     startCaptchaLoading();
-    QString captchaUrl = getServerHost() + QString::fromStdString(
-        ConfigManager::instance().get<std::string>("server.captcha_endpoint")
-        .value_or("/revelation/captchaImage")
-	);
-    NetworkManager::instance().fetchCaptcha(captchaUrl);
+ //   QString captchaUrl = getServerHost() + QString::fromStdString(
+ //       ConfigManager::instance().get<std::string>("server.captcha_endpoint")
+ //       .value_or("/revelation/captchaImage")
+	//);
+    //NetworkManager::instance().fetchCaptcha(captchaUrl);
+    NetworkManager::instance().fetchCaptcha();
 }
 
 void LoginWidget::startCaptchaLoading()
@@ -446,30 +442,6 @@ bool LoginWidget::eventFilter(QObject* obj, QEvent* event) {
     return QWidget::eventFilter(obj, event);
 }
 
-QString LoginWidget::getServerHost()  {
-    auto& cm = ConfigManager::instance();
-
-    QString host = QString::fromStdString(
-        cm.get<std::string>("server.host").value_or("")
-    );
-
-    if(host.isEmpty()) {
-        showError("请配置服务器地址");
-        return {};
-	}
-    int port = cm.get<int>("server.port", 0);
-
-    if (port != 0) {
-        host += ":" + QString::number(port);
-    }
-    if(!host.startsWith("http://") && ! host.startsWith("https://")) {
-		host = "http://" + host;
-    }
-
-    //SessionManager::instance().setServerHost(host);
-    return host;
-
-}
 
 // void LoginWidget::setupUi()
 // {

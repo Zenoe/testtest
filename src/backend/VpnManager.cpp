@@ -20,7 +20,7 @@ QString VpnManager::serviceExePath() {
 }
 
 QString VpnManager::serviceNameFrom(const QString& confPath) {
-    return "XyGuardTunnel$" + QFileInfo(confPath).fileName();
+    return "XyGuardTunnel$" + QFileInfo(confPath).baseName();
 }
 
 CmdResult VpnManager::runServiceCommand(const QString& serviceExe,

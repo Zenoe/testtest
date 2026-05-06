@@ -76,5 +76,5 @@ private:
 	bool    m_isFetchingCaptcha = false;   // 防重复点击
 	QTimer* m_loadingTimer = nullptr;
 	int     m_dotsCount = 0;
-	QString getServerHost() ;
+	//QString getServerHost() ;
 };

@@ -35,7 +35,7 @@ void loadSettings()
     ConfigManager::instance().set("log.max_size_mb", 10);     // 10 MB per file
     ConfigManager::instance().set("log.max_files", 5);
     ConfigManager::instance().saveNow();
-    // NO shutdown() ¨C singleton must stay alive
+    // NO shutdown() â€“ singleton must stay alive
 }
 
 
@@ -50,7 +50,7 @@ int main(int argc, char* argv[]) {
     spdlog::debug("main start");
     app.initialise();               // singletons + stylesheet + server pre-load
 
-	qDebug() << "Application started with config:" << QString::fromStdString(ConfigManager::instance().getSection("server").dump());
+	//qDebug() << "Application started with config:" << QString::fromStdString(ConfigManager::instance().getSection("server").dump());
     MainWindow w;
     w.show();
 	// spdlog::shutdown(); // shutdown before app.exec, cuase spdlog crash in slot functions

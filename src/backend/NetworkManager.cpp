@@ -1,4 +1,3 @@
-// backend/NetworkManager.cpp  (key methods)
 #include "NetworkManager.h"
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -6,16 +5,29 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QTimer>
+#include <QStandardPaths>
 
 #include "SessionManager.h"
+#include <utils/ConfigManager.h>
+#include "utils/logger.h"
+
+static constexpr int kTimeoutMs = 10'000;
+static constexpr int kHttpOk = 200;
+static constexpr int kHttpUnauthorized = 401;
+
+/// helper: Safely stop + schedule deletion of a QTimer from any lambda context.
+static void stopAndDelete(QTimer* t)
+{
+    if (!t) return;
+    t->stop();
+    t->deleteLater();
+}
 
 NetworkManager& NetworkManager::instance() {
     static NetworkManager inst;
     return inst;
 }
-NetworkManager::NetworkManager(QObject* parent)
-    : QObject(parent)
-    , m_nam(new QNetworkAccessManager(this))
+NetworkManager::NetworkManager(QObject* parent) : QObject(parent), m_nam(new QNetworkAccessManager(this))
 {
     // Abort all pending requests if the network goes down
     connect(m_nam, &QNetworkAccessManager::finished,
@@ -25,20 +37,52 @@ NetworkManager::NetworkManager(QObject* parent)
 }
 
 QUrl NetworkManager::baseUrl(const QString& path) const {
-    return QUrl(QString("http://%1:%2%3")
-                .arg(m_server.host)
-                .arg(m_server.port)
-                .arg(path));
+    auto& cm = ConfigManager::instance();
+    QString host = QString::fromStdString(
+        cm.get<std::string>("server.host").value_or("")
+    );
+    if (host.isEmpty()) {
+        emit serverError("服务器地址未配置");
+        return {};
+    }
+    int port = cm.get<int>("server.port", 0);
+
+    if (!host.startsWith("http://") && !host.startsWith("https://")) {
+        host = "http://" + host;
+    }
+
+    QUrl url(host);
+    if (port != 0) {
+        url.setPort(port);
+    }
+    url.setPath(path);
+    return url;
 }
 
 void NetworkManager::handleReplyError(QNetworkReply* reply,
-                                      const QString& context) {
+	const QString& context) {
     const QString msg = QString("[%1] %2").arg(context, reply->errorString());
     emit networkError(msg);
 }
 
+QTimer* NetworkManager::startTimeoutTimer(QNetworkReply* reply, const QString& context)
+{
+    auto* timer = new QTimer(this);
+    timer->setSingleShot(true);
+
+    connect(timer, &QTimer::timeout, this, [reply, timer, context]() {
+        spdlog::warn("{}: timed out after {}ms", context.toStdString(), kTimeoutMs);
+        stopAndDelete(timer);
+        if (reply && reply->isRunning())
+            reply->abort(); // triggers finished() with AbortedError
+        });
+
+    timer->start(kTimeoutMs);
+    return timer;
+}
+
 void NetworkManager::setServer(const ServerConfig& cfg) {
-    m_server = cfg;
+    //m_server = cfg;
 }
 
 void NetworkManager::testConnectivity() {
@@ -50,151 +94,175 @@ void NetworkManager::testConnectivity() {
     });
 }
 
-QNetworkRequest NetworkManager::createRequest(const QString& url)
+QNetworkRequest NetworkManager::createRequest(const QString& endpoint) const
 {
-    //QNetworkRequest request(QUrl(url));
-    QUrl qurl(url);
-    QNetworkRequest request; // 显式默认构造
-    request.setUrl(qurl);
+    const QUrl url = baseUrl(endpoint);
+    spdlog::debug("createRequest: {} -> {}", endpoint.toStdString(),
+        url.toString().toStdString());
+
+    QNetworkRequest request;
+    request.setUrl(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
-    QString token = SessionManager::instance().token();
-
+    // Attach bearer token when a session is active
+    const QString token = SessionManager::instance().token();
     if (!token.isEmpty()) {
-        request.setRawHeader("Authorization", QString("Bearer %1").arg(token).toUtf8());
+        request.setRawHeader("Authorization",
+            QStringLiteral("Bearer %1").arg(token).toUtf8());
+        spdlog::debug("createRequest: bearer token attached");
     }
 
     return request;
 }
 
-bool NetworkManager::parseStandardReply(QNetworkReply* reply, QJsonObject& outObj, QString& errorMsg)
+bool NetworkManager::parseStandardReply(QNetworkReply* reply,
+    QJsonObject& outObj,
+    QString& errorMsg)
 {
+    // ── 1. Network-level error ────────────────
     if (reply->error() != QNetworkReply::NoError) {
         errorMsg = reply->errorString();
+        spdlog::warn("parseStandardReply: network error [{}] {}",
+            static_cast<int>(reply->error()),
+            errorMsg.toStdString());
         return false;
     }
 
-    QByteArray data = reply->readAll();
-    QJsonDocument doc = QJsonDocument::fromJson(data);
+    // ── 2. Parse body ─────────────────────────
+    const QByteArray  raw = reply->readAll();
+    const QJsonDocument doc = QJsonDocument::fromJson(raw);
 
     if (!doc.isObject()) {
         errorMsg = "返回数据格式错误";
+        spdlog::error("parseStandardReply: malformed JSON body: {}",
+            QString(raw).left(256).toStdString());
         return false;
     }
 
-    QJsonObject obj = doc.object();
-    int code = obj.value("code").toInt();
+    const QJsonObject obj = doc.object();
+    const int         code = obj.value("code").toInt(-1);
 
-    if (code != 200) {
+    // ── 3. Application-level error ────────────
+    if (code != kHttpOk) {
         errorMsg = obj.value("msg").toString("请求失败");
-        //  统一处理 token 失效
-        if (code == 401) {
+        spdlog::warn("parseStandardReply: server code={} msg={}",
+            code, errorMsg.toStdString());
+
+        if (code == kHttpUnauthorized) {
+            spdlog::info("parseStandardReply: 401 – triggering session teardown");
             handleUnauthorized();
         }
-
         return false;
     }
 
+    spdlog::debug("parseStandardReply: success (code={})", code);
     outObj = obj;
     return true;
 }
 
 void NetworkManager::handleUnauthorized()
 {
+    spdlog::warn("handleUnauthorized: session expired – clearing session");
     SessionManager::instance().clearSession();
-    //emit unauthorized();
+    emit unauthorized();   // let the UI react (e.g. redirect to login)
 }
 
-void NetworkManager::login(const QString& url, const QString& username,
+void NetworkManager::login(const QString& username,
                            const QString& password, const QString& code, const QString& uuid) {
-    if (url.isEmpty()) {
-        emit loginFinished(false, "", "登录URL为空");
-        return;
-    }
 
-    //QUrl qurl(url);
-    //QNetworkRequest request(qurl);
-    //request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    const QString endpoint = QString::fromStdString(
+        ConfigManager::instance()
+        .get<std::string>("server.login_endpoint")
+        .value_or("/revelation/user/login"));
 
-    QNetworkRequest request = createRequest(url);
-    // 构造 JSON
-    QJsonObject json;
-    json["username"] = username;
-    json["password"] = password;
-    json["code"]     = code;
-    json["uuid"]     = uuid;
+    spdlog::info("login: attempt for user='{}' endpoint='{}'",
+        username.toStdString(), endpoint.toStdString());
 
-    QByteArray postData = QJsonDocument(json).toJson();
+    // ── Build request ─────────────────────────
+    const QNetworkRequest request = createRequest(endpoint);
 
-    QNetworkReply* reply = m_nam->post(request, postData);
+    const QJsonObject body{
+        { "username", username },
+        { "password", password },
+        { "code",     code     },
+        { "uuid",     uuid     },
+    };
+    const QByteArray payload = QJsonDocument(body).toJson(QJsonDocument::Compact);
 
-    // 超时控制（复用你 captcha 的写法）
-    QTimer* timeoutTimer = new QTimer(this);
-    timeoutTimer->setSingleShot(true);
-    timeoutTimer->start(10000);
+    QNetworkReply* reply = m_nam->post(request, payload);
 
-    connect(timeoutTimer, &QTimer::timeout, this, [this, reply, timeoutTimer]() {
-        if (reply && reply->isRunning()) {
-            reply->abort();
-            emit loginFinished(false, {}, "登录请求超时（10秒）");
-        }
-        timeoutTimer->deleteLater();
-        if (reply) reply->deleteLater();
-    });
+    // ── Timeout guard ─────────────────────────
+	auto* timer = startTimeoutTimer(reply, "login");
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, timeoutTimer]() {
-        timeoutTimer->stop();
-        timeoutTimer->deleteLater();
-        reply->deleteLater();
+    // ── Reply handler ─────────────────────────
+    connect(reply, &QNetworkReply::finished, this,
+        [this, reply, timer, username]() {
+            stopAndDelete(timer);
 
-        QJsonObject obj;
-        QString err;
+            // Handle abort → timeout message
+            if (reply->error() == QNetworkReply::OperationCanceledError) {
+                spdlog::error("login: aborted (timeout) for user='{}'",
+                    username.toStdString());
+                emit loginFinished(false, {}, tr("登录请求超时（10秒）"));
+                reply->deleteLater();
+                return;
+            }
 
-        if (!parseStandardReply(reply, obj, err)) {
-            emit loginFinished(false, {}, err);
+            QJsonObject obj;
+            QString     err;
+            if (!parseStandardReply(reply, obj, err)) {
+                spdlog::error("login: failed for user='{}': {}",
+                    username.toStdString(), err.toStdString());
+                emit loginFinished(false, {}, err);
+                reply->deleteLater();
+                return;
+            }
+
+            const QString token = obj.value("token").toString();
+            if (token.isEmpty()) {
+                const QString msg = "服务器未返回令牌";
+                spdlog::error("login: success response but token missing for user='{}'",
+                    username.toStdString());
+                emit loginFinished(false, {}, msg);
+                reply->deleteLater();
+                return;
+            }
+
+            spdlog::info("login: success for user='{}'", username.toStdString());
+            emit loginFinished(true, token, {});
             reply->deleteLater();
-            return;
-        }
+        });
 
-        //if (reply->error() != QNetworkReply::NoError) {
-        //    emit loginFinished(false, {}, reply->errorString());
-        //    return;
-        //}
-
-        //QByteArray data = reply->readAll();
-        //QJsonDocument doc = QJsonDocument::fromJson(data);
-
-        //if (!doc.isObject()) {
-        //    emit loginFinished(false, {}, "返回数据格式错误");
-        //    return;
-        //}
-
-        //QJsonObject obj = doc.object();
-        //int code = obj.value("code").toInt();
-
-        //if (code != 200) {
-        //    QString msg = obj.value("msg").toString("登录失败");
-        //    emit loginFinished(false, {}, msg);
-        //    return;
-        //}
-
-        QString token = obj.value("token").toString();
-
-        emit loginFinished(true, token, "");
-    });
 }
 
-void NetworkManager::logout(const QString& url)
+void NetworkManager::logout()
 {
-    QNetworkRequest request = createRequest(url);
-    QNetworkReply* reply = m_nam->post(request, QByteArray());
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        QJsonObject obj;
-        QString err;
-        parseStandardReply(reply, obj, err);
-		SessionManager::instance().clearSession();
-        emit logoutFinished();
-        reply->deleteLater();
+    static constexpr char kEndpoint[] = "/revelation/user/logout";
+    spdlog::info("logout: sending logout request");
+
+    const QNetworkRequest request = createRequest(kEndpoint);
+    QNetworkReply* reply = m_nam->post(request, QByteArray{});
+
+    connect(reply, &QNetworkReply::finished, this,
+        [this, reply]() {
+            QJsonObject obj;
+            QString     err;
+
+            if (parseStandardReply(reply, obj, err)) {
+                spdlog::info("logout: server confirmed logout");
+                SessionManager::instance().clearSession();
+                emit logoutFinished();
+            }
+            else {
+                // Treat any server-side failure as a soft error:
+                // always clear the local session so the UI isn't stuck.
+                spdlog::warn("logout: server returned error '{}' – "
+                    "clearing session locally anyway", err.toStdString());
+                SessionManager::instance().clearSession();
+                emit logoutFinished();          // or emit a separate logoutFailed(err) ??
+            }
+
+            reply->deleteLater();
         });
 }
 
@@ -231,63 +299,173 @@ void NetworkManager::get(const QUrl& url, std::function<void(QNetworkReply*)> ca
         });
     }
 
-void NetworkManager::fetchCaptcha(const QString& url)
+void NetworkManager::fetchCaptcha()
 {
-    if (url.isEmpty()) {
-        emit captchaFetched(false, {}, {}, false, "验证码URL配置为空");
-        return;
-    }
-    QNetworkReply* reply = m_nam->get(QNetworkRequest(QUrl(url)));
-    QTimer* timeoutTimer = new QTimer(this);
-    timeoutTimer->setSingleShot(true);
-    timeoutTimer->start(10000);   // 10秒超时，可自行修改
+    const QString endpoint = QString::fromStdString(
+        ConfigManager::instance()
+        .get<std::string>("server.captcha_endpoint")
+        .value_or("/revelation/captchaImage"));
 
-    // 超时处理
-    connect(timeoutTimer, &QTimer::timeout, this, [this, reply, timeoutTimer]() {
-        if (reply && reply->isRunning()) {
-            reply->abort();
-            emit captchaFetched(false, {}, {}, false, "请求验证码超时（10秒）");
-        }
-        timeoutTimer->deleteLater();
-        if (reply) reply->deleteLater();
-    });
+    spdlog::debug("fetchCaptcha: requesting endpoint='{}'", endpoint.toStdString());
 
-    // 正常完成
-    connect(reply, &QNetworkReply::finished, this, [this, reply, timeoutTimer]() {
-        timeoutTimer->stop();
-        timeoutTimer->deleteLater();
+    QNetworkReply* reply = m_nam->get(createRequest(endpoint));
 
-        reply->deleteLater();
+    auto* timer = startTimeoutTimer(reply, "fetchCaptcha");
+    connect(reply, &QNetworkReply::finished, this,
+        [this, reply, timer]() {
+            stopAndDelete(timer);
 
-        if (reply->error() != QNetworkReply::NoError) {
-            emit captchaFetched(false, {}, {}, false, reply->errorString());
-            return;
-        }
+            // ── Timeout / abort ───────────────────────
+            if (reply->error() == QNetworkReply::OperationCanceledError) {
+                spdlog::error("fetchCaptcha: aborted (timeout)");
+                emit captchaFetched(false, {}, {}, false, tr("请求验证码超时（10秒）"));
+                reply->deleteLater();
+                return;
+            }
 
-        QByteArray responseData = reply->readAll();
-        QJsonDocument doc = QJsonDocument::fromJson(responseData);
+            // ── Network-level error ───────────────────
+            if (reply->error() != QNetworkReply::NoError) {
+                const QString err = reply->errorString();
+                spdlog::error("fetchCaptcha: network error [{}] {}",
+                    static_cast<int>(reply->error()),
+                    err.toStdString());
+                emit captchaFetched(false, {}, {}, false, err);
+                reply->deleteLater();
+                return;
+            }
 
-        if (doc.isNull() || !doc.isObject()) {
-            emit captchaFetched(false, {}, {}, false, "返回数据不是有效的JSON");
-            return;
-        }
+            // ── Parse JSON ────────────────────────────
+            const QByteArray   raw = reply->readAll();
+            const QJsonDocument doc = QJsonDocument::fromJson(raw);
 
-        QJsonObject obj = doc.object();
-        int code = obj.value("code").toInt();
+            if (!doc.isObject()) {
+                spdlog::error("fetchCaptcha: malformed JSON: {}",
+                    QString(raw).left(256).toStdString());
+                emit captchaFetched(false, {}, {}, false, tr("返回数据不是有效的JSON"));
+                reply->deleteLater();
+                return;
+            }
 
-        if (code != 200) {
-            QString msg = obj.value("msg").toString("未知错误");
-            emit captchaFetched(false, {}, {}, false, msg);
-            return;
-        }
+            const QJsonObject obj = doc.object();
+            const int         code = obj.value("code").toInt(-1);
 
-        QString imgBase64     = obj.value("img").toString();
-        QString uuid          = obj.value("uuid").toString();
-        bool    captchaEnabled = obj.value("captchaEnabled").toBool(false);
+            // ── Application-level error ───────────────
+            if (code != kHttpOk) {
+                const QString msg = obj.value("msg").toString("未知错误");
+                spdlog::warn("fetchCaptcha: server code={} msg={}", code,
+                    msg.toStdString());
+                emit captchaFetched(false, {}, {}, false, msg);
+                reply->deleteLater();
+                return;
+            }
 
-        emit captchaFetched(true, imgBase64, uuid, captchaEnabled, "");
-    });
+            // ── Validate payload fields ───────────────
+            const QString imgBase64 = obj.value("img").toString();
+            const QString uuid = obj.value("uuid").toString();
+            const bool    captchaEnabled = obj.value("captchaEnabled").toBool(false);
+
+            if (imgBase64.isEmpty() || uuid.isEmpty()) {
+                spdlog::error("fetchCaptcha: success code but missing img/uuid fields");
+                emit captchaFetched(false, {}, {}, false, tr("验证码数据不完整"));
+                reply->deleteLater();
+                return;
+            }
+
+            spdlog::info("fetchCaptcha: success captchaEnabled={}", captchaEnabled);
+            emit captchaFetched(true, imgBase64, uuid, captchaEnabled, {});
+            reply->deleteLater();
+        });
+
 }
+
+void NetworkManager::fetchVpnConf()
+{
+    const QString endpoint = QString::fromStdString(
+        ConfigManager::instance()
+        .get<std::string>("server.vpnconf_endpoint")
+        .value_or("/revelation/user/vpnConfig"));
+
+    spdlog::debug("fetchVpnConf: requesting endpoint='{}'", endpoint.toStdString());
+
+    QNetworkReply* reply = m_nam->post(createRequest(endpoint), QByteArray{});
+    auto* timer = startTimeoutTimer(reply, "fetchVpnConf");
+
+    connect(reply, &QNetworkReply::finished, this,
+        [this, reply, timer]() {
+            stopAndDelete(timer);
+
+            // ── Timeout / abort ───────────────────────
+            if (reply->error() == QNetworkReply::OperationCanceledError) {
+                spdlog::error("fetchVpnConf: aborted (timeout)");
+                emit vpnConfFetched(false, {}, tr("获取VPN配置超时"));
+                reply->deleteLater();
+                return;
+            }
+
+            QJsonObject obj;
+            QString     err;
+            if (!parseStandardReply(reply, obj, err)) {
+                spdlog::error("fetchVpnConf: {}", err.toStdString());
+                emit vpnConfFetched(false, {}, err);
+                reply->deleteLater();
+                return;
+            }
+
+            const QJsonObject data = obj.value("data").toObject();
+            const QJsonObject peer = data.value("peer").toObject();
+            const QJsonObject iface = data.value("interface").toObject();
+
+            const QString peerEndpoint = peer.value("endpoint").toString();
+            const QString peerPublicKey = peer.value("publicKey").toString();
+            const QString presharedKey = peer.value("presharedKey").toString();
+            const QString privateKey = iface.value("privateKey").toString();
+            const QString address = iface.value("address").toString();
+            const QString dns = iface.value("dns").toString();
+
+            if (peerEndpoint.isEmpty() || peerPublicKey.isEmpty()
+                || privateKey.isEmpty() || address.isEmpty()) {
+                spdlog::error("fetchVpnConf: missing required fields in response");
+                emit vpnConfFetched(false, {}, tr("VPN配置数据不完整"));
+                reply->deleteLater();
+                return;
+            }
+
+            VpnConfig config;
+            config.peer.endpoint = peerEndpoint;
+            config.peer.publicKey = peerPublicKey;
+            config.peer.presharedKey = presharedKey;
+            config.peer.persistentKeepalive = peer.value("persistentKeepalive").toInt(25);
+            config.peer.allowedIPs = [&] {
+                QStringList list;
+                for (const auto& ip : peer.value("allowedIPs").toArray())
+                    list << ip.toString();
+                return list;
+                }();
+            config.iface.privateKey = privateKey;
+            config.iface.address = address;
+            config.iface.dns = dns;
+            config.iface.mtu = iface.value("mtu").toInt(1420);
+
+            spdlog::info("fetchVpnConf: success address='{}' endpoint='{}'",
+                address.toStdString(), peerEndpoint.toStdString());
+
+            const QString confPath = QStandardPaths::writableLocation(
+                QStandardPaths::AppDataLocation)
+                + "/clientx.conf";
+
+            if (!config.writeVpnConfig(confPath)) {
+                emit vpnConfFetched(false, {}, tr("无法写入VPN配置文件"));
+                reply->deleteLater();
+                return;
+            }
+
+            spdlog::debug("fetchVpnConf: config written to '{}'", confPath.toStdString());
+
+            emit vpnConfFetched(true, config, {});
+            reply->deleteLater();
+        });
+}
+
 // void NetworkManager::fetchCaptcha(const QString& url)
 // {
 //     if (url.isEmpty()) {

@@ -43,6 +43,10 @@ bool SessionManager::rememberMe() const {
     return m_session.rememberMe && m_session.isValid();
 }
 
+bool SessionManager::isVpnConnected() const {
+    return m_session.vpnConnected && m_session.isValid();
+}
+
 QString SessionManager::token() const {
     return m_session.token;
 }

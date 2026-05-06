@@ -68,6 +68,11 @@ qt_add_executable(Revelation
     src/utils/ConfigManager.cpp
     src/utils/stringutil.h
     src/models/UserSession.h
+    src/models/VpnConf.cpp
+    src/vpn/driver.h
+    src/vpn/driver.cpp
+    src/vpn/StatusPanel.h
+    src/vpn/StatusPanel.cpp
     ${COMMON_SOURCES}
     app.qrc
 )
@@ -92,12 +97,23 @@ set_target_properties(Revelation PROPERTIES
 # ── Post-build: copy DLLs (Windows only) ────────────────────────────────────
 if(WIN32)
     # Copy everything from lib/bin next to the executable
-    add_custom_command(TARGET Revelation POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/lib/bin"
-            $<TARGET_FILE_DIR:Revelation>
-        COMMENT "Copying lib/bin DLLs to output directory"
-    )
+    #add_custom_command(TARGET Revelation POST_BUILD
+    #    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    #        "${CMAKE_SOURCE_DIR}/lib/bin"
+    #        $<TARGET_FILE_DIR:Revelation>
+    #    COMMENT "Copying lib/bin DLLs to output directory"
+    #)
+
+	file(GLOB DLL_FILES "${CMAKE_SOURCE_DIR}/lib/bin/*.dll")
+
+    foreach(dll ${DLL_FILES})
+        add_custom_command(TARGET Revelation POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${dll}"
+                $<TARGET_FILE_DIR:Revelation>
+            COMMENT "Copying ${dll} if different"
+        )
+    endforeach()
 
     # Deploy Qt runtime DLLs via windeployqt
     get_target_property(_qt6_core_loc Qt6::Core IMPORTED_LOCATION)

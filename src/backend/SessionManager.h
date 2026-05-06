@@ -13,6 +13,7 @@ public:
 
     bool          isLoggedIn()  const;
     bool          rememberMe() const;
+  bool isVpnConnected() const;
     QString       token()       const;
     QString       username()    const;
 	QString       vpnConf()  const;

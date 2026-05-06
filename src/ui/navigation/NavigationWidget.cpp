@@ -45,23 +45,7 @@ void NavigationWidget::setupUi() {
     //avatar->setOnline(true);
     m_layout->addWidget(avatar, 0, Qt::AlignHCenter);
     m_layout->addSpacing(16);
-   connect(avatar, &AvatarWidget::logoutRequested, this, [this]() {
-       // QString loginUrl = getServerHost() + QString::fromStdString(
-       //     ConfigManager::instance().get<std::string>("server.login_endpoint")
-       //     .value_or("/revelation/user/login")
-       // );
-       // NetworkManager::instance().login(
-       //     loginUrl,
-       //     user,
-       //     pass,
-       //     captcha,
-       //     m_captchaUuid
-       // );
-
-  //      SessionManager::instance().clearSession();
-  //      emit itemSelected("1");
-       spdlog::info("logout");
-		});
+   connect(avatar, &AvatarWidget::logoutRequested, this, &NavigationWidget::logoutRequested);
 
     // ── Navigation items ──────────────────────────────────────────────────────
     addNavItem("security",  ":/security.svg",  "Security");
