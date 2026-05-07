@@ -79,6 +79,7 @@ void MainWindow::addTestButtons() {
     testToolbar->addWidget(btnVpn);
 
     auto* btnDisVpn = new QPushButton("vpn stop", this);
+    btnDisVpn->setFixedHeight(30);
     QObject::connect(btnDisVpn, &QPushButton::clicked, this, [this]() {
         connect(&VpnManager::instance(), &VpnManager::disconnected,
             this, [this](const QString&) {
@@ -165,6 +166,9 @@ void MainWindow::setupConnections() {
         });
     connect(&net, &NetworkManager::connectivityResult,
             m_serverCfg, &ServerConfigWidget::onTestResult);
+
+    connect(&net, &NetworkManager::vpnConfFetched, this, &MainWindow::onVpnConfFetched);
+    connect(&net, &NetworkManager::unauthorized, this, &MainWindow::onUnauthorized);
     connect(&net, &NetworkManager::appListReady,
             m_appGrid, &AppGridWidget::onAppsReceived);
 
@@ -229,23 +233,46 @@ void MainWindow::onTestConnection() {
 
 void MainWindow::onLoginSuccess(const QString& token) {
     const QString confPath = SessionManager::instance().vpnConf();
+    NetworkManager::instance().fetchVpnConf();
+    // VpnManager::instance().connectVpn(confPath);
+    // switchToPage(2);
+    // NetworkManager::instance().fetchAppList(token);
+}
 
+void MainWindow::onVpnConfFetched(bool success, const VpnConfig& config, const QString& errorMsg)
+{
+    if (!success) {
+      spdlog::error("Failed to fetch VPN config: {}", errorMsg.toStdString());
+      m_login->showError("vpn配置获取失败");
+      return;
+    }
+    // const QString confPath = QStandardPaths::writableLocation(
+    //     QStandardPaths::AppDataLocation)
+    //     + "/clientx.conf";
+
+    const QString confPath = SessionManager::instance().vpnConf();
+    // if (!config.writeVpnConfig(confPath)) {
+    //   spdlog::error("Failed to write VPN config to '{}'", confPath.toStdString());
+    //   return;
+    // }
+
+    spdlog::debug("fetchVpnConf: config written to '{}'", confPath.toStdString());
     connect(&VpnManager::instance(), &VpnManager::connected,
-            this, [this, token](const QString&) {
+            this, [this](const QString&) {
                 switchToPage(2);
-                NetworkManager::instance().fetchAppList(token);
-            });
+                NetworkManager::instance().fetchSandBoxConf();
+            }, Qt::SingleShotConnection);
 
     connect(&VpnManager::instance(), &VpnManager::errorOccurred,
             this, [this](const QString& ctx, const QString& detail) {
                 QMessageBox::critical(this, "VPN Error",
                     QString("Failed at step [%1]: %2").arg(ctx, detail));
-            });
+            }, Qt::SingleShotConnection);
+	VpnManager::instance().connectVpn(confPath);
+}
 
-    NetworkManager::instance().fetchVpnConf();
-    // VpnManager::instance().connectVpn(confPath);
-    // switchToPage(2);
-    // NetworkManager::instance().fetchAppList(token);
+void MainWindow::onUnauthorized(){
+  m_login->showError("权限不足");
 }
 
 void MainWindow::onLogout() {

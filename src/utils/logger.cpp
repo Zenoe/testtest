@@ -3,6 +3,36 @@
 #include "ConfigManager.h"
 #include "Win32Log.h"
 
+// ── Unicode-aware MSVC sink ──────────────────────────────────────────────────
+// spdlog's built-in msvc_sink uses OutputDebugStringA — garbles non-ASCII.
+// This sink converts UTF-8 → UTF-16 and calls OutputDebugStringW instead.
+#ifdef _DEBUG
+template<typename Mutex>
+class msvc_sink_utf8 : public spdlog::sinks::base_sink<Mutex>
+{
+protected:
+    void sink_it_(const spdlog::details::log_msg& msg) override
+    {
+        spdlog::memory_buf_t buf;
+        spdlog::sinks::base_sink<Mutex>::formatter_->format(msg, buf);
+        // buf is UTF-8; convert to UTF-16 for OutputDebugStringW
+        std::string utf8(buf.data(), buf.size());
+        int wlen = MultiByteToWideChar(CP_UTF8, 0,
+                                       utf8.c_str(), static_cast<int>(utf8.size()),
+                                       nullptr, 0);
+        if (wlen <= 0) return;
+        std::wstring utf16(wlen, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0,
+                            utf8.c_str(), static_cast<int>(utf8.size()),
+                            utf16.data(), wlen);
+        OutputDebugStringW(utf16.c_str());
+    }
+    void flush_() override {}
+};
+
+using msvc_sink_utf8_mt = msvc_sink_utf8<std::mutex>;
+#endif
+
 void setup_logging()
 {
     // Get full path + rotation settings from config
@@ -29,7 +59,8 @@ void setup_logging()
             std::string(ex.what()) + "\n").c_str());
     }
 #ifdef _DEBUG
-    sinks.push_back(std::make_shared<spdlog::sinks::msvc_sink_mt>());
+    // sinks.push_back(std::make_shared<spdlog::sinks::msvc_sink_mt>());
+    sinks.push_back(std::make_shared<msvc_sink_utf8_mt>());
 #endif
 
     // ── logger ──────────────────────────────────────────────────────────────

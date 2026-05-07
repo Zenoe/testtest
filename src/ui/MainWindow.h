@@ -7,6 +7,9 @@
 #include "ui/pages/LoginWidget.h"
 #include "ui/pages/AppGridWidget.h"
 #include <models/UserSession.h>
+#include "models/VpnConf.h"
+
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -17,6 +20,8 @@ private slots:
     void onTestConnection();
     void onLoginSuccess(const QString& token);
     //void onLoginResult(bool ok, const UserSession& session, const QString& err);
+    void onVpnConfFetched(bool success, const VpnConfig& config, const QString& errorMsg);
+    void onUnauthorized();
     void onLogout();
     void onAppQuit();
     void onNavItemSelected(const QString& id);

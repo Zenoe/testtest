@@ -6,6 +6,8 @@
 #include "models/UserSession.h"
 #include "models/VpnConf.h"
 
+enum class ParseResult { Ok, NetworkError, Unauthorized, ServerError };
+
 class NetworkManager : public QObject {
     Q_OBJECT
 
@@ -18,6 +20,8 @@ public:
     // All calls are async; results arrive via signals
     void testConnectivity();
     void fetchAppList(const QString& token);
+
+    void fetchSandBoxConf();
     void logout();          // optional server-side invalidation
     void fetchCaptcha();
     void fetchVpnConf();
@@ -26,7 +30,7 @@ public:
 	void get(const QUrl& url, std::function<void(QNetworkReply*)> callback);
     void login(const QString& username, const QString& password, const QString& code, const QString& uuid);
     QNetworkRequest createRequest(const QString& url) const;
-    bool parseStandardReply(QNetworkReply* reply, QJsonObject& outObj, QString& errorMsg);
+    ParseResult parseStandardReply(QNetworkReply* reply, QJsonObject& outObj, QString& errorMsg);
     void handleUnauthorized();
 
 signals:

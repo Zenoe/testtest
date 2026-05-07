@@ -365,7 +365,32 @@ void StatusPoller::stop()
         m_timer = nullptr;
     }
 }
+#include <QDateTime>
+QString StatusPoller::formatHandshake(quint64 lastHandshakeMsec) {
+    if (lastHandshakeMsec == 0)
+        return QObject::tr("Never");
 
+    quint64 nowMsec = static_cast<quint64>(
+        QDateTime::currentMSecsSinceEpoch());
+    quint64 elapsedSec = (nowMsec - lastHandshakeMsec) / 1000;
+
+    quint64 days    = elapsedSec / 86400;
+    quint64 hours   = (elapsedSec % 86400) / 3600;
+    quint64 minutes = (elapsedSec % 3600) / 60;
+    quint64 seconds = elapsedSec % 60;
+
+    QString result;
+    if (days > 0)
+        result += QString("%1 天%2, ").arg(days).arg(days == 1 ? "" : "s");
+    if (hours > 0)
+        result += QString("%1 时%2, ").arg(hours).arg(hours == 1 ? "" : "s");
+    if (minutes > 0)
+        result += QString("%1 分%2, ").arg(minutes).arg(minutes == 1 ? "" : "s");
+    result += QString("%1 秒%2").arg(seconds).arg(seconds == 1 ? "" : "s");
+
+    return result;
+    //return result + QObject::tr(" 前");
+}
 void StatusPoller::poll()
 {
     if (!m_running)
@@ -375,17 +400,20 @@ void StatusPoller::poll()
         auto adapter = Tunnel::Driver::Adapter::open(m_configFile.toStdWString());
         const Tunnel::Interface cfg = adapter.getConfiguration();
 
-        quint64 rx = 0, tx = 0;
+        quint64 rx = 0, tx = 0, lastHandshake=0;
+        // only one peer for a client
         for (const auto& peer : cfg.peers) {
             rx += static_cast<quint64>(peer.rxBytes);
             tx += static_cast<quint64>(peer.txBytes);
+            // Most recent handshake across all peers (tunnel is "alive" if any peer is active)
+            lastHandshake = (std::max)(lastHandshake, static_cast<quint64>(peer.lastHandshakeMsec));
         }
 
+        //spdlog::debug("lastHandshakeMsec: {}", formatHandshake(lastHandshake).toStdString());
         emit statsReady(rx, tx);
     }
     catch (const std::exception& ex) {
         emit errorOccurred(QString::fromStdString(ex.what()));
         spdlog::debug("StatusPoller::poll failed: {}", ex.what());
-        // Timer will fire again in 1 s — mirrors the C# retry loop
     }
 }

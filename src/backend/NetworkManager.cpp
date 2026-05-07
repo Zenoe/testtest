@@ -115,7 +115,7 @@ QNetworkRequest NetworkManager::createRequest(const QString& endpoint) const
     return request;
 }
 
-bool NetworkManager::parseStandardReply(QNetworkReply* reply,
+ParseResult NetworkManager::parseStandardReply(QNetworkReply* reply,
     QJsonObject& outObj,
     QString& errorMsg)
 {
@@ -125,7 +125,7 @@ bool NetworkManager::parseStandardReply(QNetworkReply* reply,
         spdlog::warn("parseStandardReply: network error [{}] {}",
             static_cast<int>(reply->error()),
             errorMsg.toStdString());
-        return false;
+        return ParseResult::NetworkError;
     }
 
     // ── 2. Parse body ─────────────────────────
@@ -136,7 +136,7 @@ bool NetworkManager::parseStandardReply(QNetworkReply* reply,
         errorMsg = "返回数据格式错误";
         spdlog::error("parseStandardReply: malformed JSON body: {}",
             QString(raw).left(256).toStdString());
-        return false;
+        return ParseResult::ServerError;
     }
 
     const QJsonObject obj = doc.object();
@@ -152,17 +152,17 @@ bool NetworkManager::parseStandardReply(QNetworkReply* reply,
             spdlog::info("parseStandardReply: 401 – triggering session teardown");
             handleUnauthorized();
         }
-        return false;
+        return ParseResult::Unauthorized;
     }
 
     spdlog::debug("parseStandardReply: success (code={})", code);
     outObj = obj;
-    return true;
+    return ParseResult::Ok;
 }
 
 void NetworkManager::handleUnauthorized()
 {
-    spdlog::warn("handleUnauthorized: session expired – clearing session");
+    spdlog::warn("handleUnauthorized: – clearing session");
     SessionManager::instance().clearSession();
     emit unauthorized();   // let the UI react (e.g. redirect to login)
 }
@@ -209,11 +209,11 @@ void NetworkManager::login(const QString& username,
             }
 
             QJsonObject obj;
-            QString     err;
-            if (!parseStandardReply(reply, obj, err)) {
+            QString     errstr;
+            if (parseStandardReply(reply, obj, errstr) != ParseResult::Ok) {
                 spdlog::error("login: failed for user='{}': {}",
-                    username.toStdString(), err.toStdString());
-                emit loginFinished(false, {}, err);
+                    username.toStdString(), errstr.toStdString());
+                emit loginFinished(false, {}, errstr);
                 reply->deleteLater();
                 return;
             }
@@ -237,7 +237,7 @@ void NetworkManager::login(const QString& username,
 
 void NetworkManager::logout()
 {
-    static constexpr char kEndpoint[] = "/revelation/user/logout";
+    static constexpr char kEndpoint[] = "/revelation/logout";
     spdlog::info("logout: sending logout request");
 
     const QNetworkRequest request = createRequest(kEndpoint);
@@ -248,7 +248,7 @@ void NetworkManager::logout()
             QJsonObject obj;
             QString     err;
 
-            if (parseStandardReply(reply, obj, err)) {
+            if (parseStandardReply(reply, obj, err) == ParseResult::Ok) {
                 spdlog::info("logout: server confirmed logout");
                 SessionManager::instance().clearSession();
                 emit logoutFinished();
@@ -264,6 +264,10 @@ void NetworkManager::logout()
 
             reply->deleteLater();
         });
+}
+
+void NetworkManager::fetchSandBoxConf() {
+    spdlog::info("fetchSandBoxConf");
 }
 
 void NetworkManager::fetchAppList(const QString& token) {
@@ -404,9 +408,9 @@ void NetworkManager::fetchVpnConf()
 
             QJsonObject obj;
             QString     err;
-            if (!parseStandardReply(reply, obj, err)) {
-                spdlog::error("fetchVpnConf: {}", err.toStdString());
-                emit vpnConfFetched(false, {}, err);
+            if (parseStandardReply(reply, obj, err) == ParseResult::Unauthorized) {
+                //spdlog::error("fetchVpnConf: {}", err.toStdString());
+                //emit vpnConfFetched(false, {}, err);
                 reply->deleteLater();
                 return;
             }
@@ -448,18 +452,6 @@ void NetworkManager::fetchVpnConf()
 
             spdlog::info("fetchVpnConf: success address='{}' endpoint='{}'",
                 address.toStdString(), peerEndpoint.toStdString());
-
-            const QString confPath = QStandardPaths::writableLocation(
-                QStandardPaths::AppDataLocation)
-                + "/clientx.conf";
-
-            if (!config.writeVpnConfig(confPath)) {
-                emit vpnConfFetched(false, {}, tr("无法写入VPN配置文件"));
-                reply->deleteLater();
-                return;
-            }
-
-            spdlog::debug("fetchVpnConf: config written to '{}'", confPath.toStdString());
 
             emit vpnConfFetched(true, config, {});
             reply->deleteLater();

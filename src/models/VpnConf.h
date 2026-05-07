@@ -1,4 +1,4 @@
-
+#pragma once
 struct VpnIfaceConfig {
     QString privateKey;
     QString address;

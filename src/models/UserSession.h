@@ -9,14 +9,27 @@ struct UserSession {
 	QString token;
 	bool rememberMe = false;
 
-	QString vpnconf = "C:/Users/2004l/Downloads/client1.conf";// fixme
 	bool vpnConnected = false;
 	//QDateTime& expiry;
 	bool isValid() const { return !token.isEmpty(); }
-	void clear() { username.clear(); token.clear(); rememberMe = false; vpnConnected = false; }
+	void clear() { username.clear(); token.clear(); rememberMe = false; vpnConnected = false; confPath.clear();}
+	QString getVpnConf() const{
 
-	QString confPath = resolveConfPath();
+    if (confPath.isEmpty()) {
+        confPath = resolveConfPath();
+    }
+	return confPath;
+	}
 
+  UserSession(){
+  }
+
+    UserSession(const QString& name, const QString& token,  bool remember)
+        : username(name),  token(token), rememberMe(remember) {}
+
+
+private:
+	QString mutable confPath;
 private:
 	static inline QString generateRandomString(int length = 16) {
 		const QString chars = QStringLiteral("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
@@ -34,6 +47,8 @@ private:
 		//	name = generateRandomString(16) + ".conf";
 		//	settings.setValue("confFileName", name);
 		//}
+    return  "C:/Users/2004l/Downloads/client1.conf";
+
 		QString name = generateRandomString(16) + ".conf";
 		return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/" + name;
 	}

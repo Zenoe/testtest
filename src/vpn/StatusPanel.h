@@ -88,4 +88,5 @@ private:
     QString  m_configFile;
     QTimer*  m_timer   = nullptr;
     bool     m_running = false;
+    static QString formatHandshake(quint64 lastHandshakeMsec);
 };
