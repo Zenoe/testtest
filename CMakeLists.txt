@@ -1,4 +1,4 @@
-# Added CMAKE_CXX_STANDARD_REQUIRED ON and EXTENSIONS OFF — best practice to prevent silent fallback to a different standard.
+﻿# Added CMAKE_CXX_STANDARD_REQUIRED ON and EXTENSIONS OFF — best practice to prevent silent fallback to a different standard.
 # Replaced set(PLATFORM_SOURCES ...) + separate if blocks with a single if/elseif using list(APPEND COMMON_SOURCES ...) — cleaner, no separate variable needed.
 # Sorted sources into logical groups (ui, backend, utils, models).
 # Added a single lib/bin copy with copy_directory — one command covers all DLLs in that folder, no need to enumerate them.
@@ -26,6 +26,7 @@ endif()
 # ── Dependencies ─────────────────────────────────────────────────────────────
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network)
 find_package(spdlog CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 # ── Platform-specific sources ────────────────────────────────────────────────
 set(COMMON_SOURCES
@@ -62,11 +63,13 @@ qt_add_executable(Revelation
     src/backend/SessionManager.cpp
     src/backend/AppLauncher.cpp
     src/backend/VpnManager.cpp
+    src/backend/SpaManager.cpp
     src/utils/logger.h
     src/utils/logger.cpp
     src/utils/ConfigManager.h
     src/utils/ConfigManager.cpp
     src/utils/stringutil.h
+    src/utils/RouteConflictChecker.cpp
     src/models/UserSession.h
     src/models/VpnConf.cpp
     src/vpn/driver.h
@@ -88,6 +91,8 @@ target_link_libraries(Revelation PRIVATE
     Qt6::Widgets
     Qt6::Network
     spdlog::spdlog
+    OpenSSL::SSL
+    OpenSSL::Crypto
 )
 
 set_target_properties(Revelation PROPERTIES

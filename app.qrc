@@ -1,4 +1,4 @@
-<!DOCTYPE RCC>
+﻿<!DOCTYPE RCC>
 <RCC version="1.0">
     <qresource prefix="/">
         <file alias="style.qss">resources/style.qss</file>
@@ -8,5 +8,6 @@
         <file alias="tools.svg">resources/icons/tools.svg</file>
         <file alias="store.svg">resources/icons/store.svg</file>
         <file alias="checkmark.svg">resources/icons/checkmark.svg</file>
+        <file alias="tray.ico">resources/icons/tray.ico</file>
     </qresource>
 </RCC>

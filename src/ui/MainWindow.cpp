@@ -1,10 +1,13 @@
-// ui/MainWindow.cpp
+﻿// ui/MainWindow.cpp
 #include "MainWindow.h"
 #include "utils/ConfigManager.h"
 #include "backend/NetworkManager.h"
 #include "backend/SessionManager.h"
 #include "backend/VpnManager.h"
 #include "secure/SecureStorageFactory.h"
+#include <QMenu>
+#include <QAction>
+#include <QCloseEvent>
 #include <QHBoxLayout>
 #include <QApplication>
 #include <QWidget>
@@ -16,6 +19,7 @@
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setupUi();
+    // setupTray();
     setupConnections();
     determineInitialState();
 }
@@ -324,4 +328,68 @@ void MainWindow::onAppQuit()
     SessionManager::instance().clearSession();
 
     qDebug() << "Session cleared on exit";
+}
+
+void MainWindow::setupTray()
+{
+    // --- Icon: use your app resource, or fall back to a built-in Qt icon ---
+    const QIcon appIcon = QIcon(":/tray.ico");   // adjust path
+    // const QIcon appIcon = QApplication::style()->standardIcon(QStyle::SP_ComputerIcon);
+
+    m_trayIcon = new QSystemTrayIcon(appIcon, this);
+    m_trayIcon->setToolTip("Revelation");
+
+    // Context menu
+    m_trayMenu = new QMenu(this);
+
+    auto* actionShow = m_trayMenu->addAction("Show / Hide");
+    m_trayMenu->addSeparator();
+    auto* actionQuit = m_trayMenu->addAction("Quit");
+
+    connect(actionShow, &QAction::triggered, this, &MainWindow::toggleWindowVisibility);
+    connect(actionQuit, &QAction::triggered, qApp, &QApplication::quit);
+
+    m_trayIcon->setContextMenu(m_trayMenu);
+    m_trayIcon->show();
+
+    connect(m_trayIcon, &QSystemTrayIcon::activated,
+            this,       &MainWindow::onTrayIconActivated);
+}
+
+void MainWindow::onTrayIconActivated(QSystemTrayIcon::ActivationReason reason)
+{
+    // Single-click or double-click toggles the window
+    if (reason == QSystemTrayIcon::Trigger ||
+        reason == QSystemTrayIcon::DoubleClick)
+    {
+        toggleWindowVisibility();
+    }
+}
+
+void MainWindow::toggleWindowVisibility()
+{
+    if (isVisible() && !isMinimized()) {
+        hide();
+    } else {
+        showNormal();
+        raise();
+        activateWindow();
+    }
+}
+
+// Override closeEvent so the X button minimizes to tray instead of quitting
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (m_trayIcon && m_trayIcon->isVisible()) {
+        hide();
+        m_trayIcon->showMessage(
+            "Revelation",
+            "Right-click the icon to quit.",
+            QSystemTrayIcon::Information,
+            2500   // ms
+        );
+        event->ignore();   // don't actually close
+    } else {
+        event->accept();   // no tray? close normally
+    }
 }

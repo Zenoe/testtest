@@ -1,4 +1,4 @@
-#include "NetworkManager.h"
+﻿#include "NetworkManager.h"
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QJsonDocument>
@@ -10,6 +10,7 @@
 #include "SessionManager.h"
 #include <utils/ConfigManager.h>
 #include "utils/logger.h"
+#include <utils/RouteConflictChecker.h>
 
 static constexpr int kTimeoutMs = 10'000;
 static constexpr int kHttpOk = 200;
@@ -27,8 +28,12 @@ NetworkManager& NetworkManager::instance() {
     static NetworkManager inst;
     return inst;
 }
-NetworkManager::NetworkManager(QObject* parent) : QObject(parent), m_nam(new QNetworkAccessManager(this))
+NetworkManager::NetworkManager(QObject* parent) : QObject(parent), m_nam(new QNetworkAccessManager(this)), m_spa(this)
 {
+    if (!m_spa.loadFromConfig()) {
+        spdlog::warn("NetworkManager: SPA config invalid — "
+            "connections will proceed without port knock");
+    }
     // Abort all pending requests if the network goes down
     connect(m_nam, &QNetworkAccessManager::finished,
             this, [](QNetworkReply* reply) {
@@ -449,6 +454,26 @@ void NetworkManager::fetchVpnConf()
             config.iface.address = address;
             config.iface.dns = dns;
             config.iface.mtu = iface.value("mtu").toInt(1420);
+
+            const RouteCheckResult check = checkRouteConflicts(
+                config.iface.address,
+                config.peer.allowedIPs);
+
+            if (check.hasConflicts()) {
+                spdlog::error("[VPN] Aborting config apply due to {} route conflict(s)",
+                    check.conflicts.size());
+                for (const auto& c : check.conflicts) {
+                    spdlog::error("[VPN]   existing route {} (gw {}) conflicts with {} [{}]",
+                        c.existingNetwork.toStdString(),
+                        c.existingGateway.toStdString(),
+                        c.conflictingCidr.toStdString(),
+                        c.source.toStdString());
+                }
+                // surface to UI / return error to caller
+                emit vpnConfFetched(false, {}, tr("VPN地址和本地路由有冲突"));
+                reply->deleteLater();
+                return;
+            }
 
             spdlog::info("fetchVpnConf: success address='{}' endpoint='{}'",
                 address.toStdString(), peerEndpoint.toStdString());

@@ -1,10 +1,12 @@
-#pragma once
+﻿#pragma once
 #include <QObject>
 #include <QNetworkAccessManager>
 #include "models/ServerConfig.h"
 #include "models/AppEntry.h"
 #include "models/UserSession.h"
 #include "models/VpnConf.h"
+
+#include "SpaManager.h"
 
 enum class ParseResult { Ok, NetworkError, Unauthorized, ServerError };
 
@@ -61,5 +63,6 @@ private:
     QTimer* startTimeoutTimer(QNetworkReply* reply, const QString& context);
 
     QNetworkAccessManager* m_nam;
+    SpaManager  m_spa;
     //ServerConfig           m_server;
 };
