@@ -1,4 +1,4 @@
-#include "AvatarWidget.h"
+﻿#include "AvatarWidget.h"
 #include <QPainter>
 #include <QMouseEvent>
 #include <QApplication>
@@ -55,7 +55,7 @@ AvatarWidget::AvatarWidget(QWidget* parent) : QWidget(parent)
 
 void AvatarWidget::showVpnStatus() {
     if (!m_statusPanel) {
-        const QString confPath = SessionManager::instance().vpnConf();
+        const QString confPath = SessionManager::instance().vpnConfPath();
         if (confPath.isEmpty()) {
             spdlog::warn("AvatarWidget::showVpnStatus: vpnConf() is empty — aborting");
             return;

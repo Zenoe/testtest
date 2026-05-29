@@ -21,6 +21,7 @@ private slots:
     void onConfigSaved(const ServerConfig& cfg);
     void onTestConnection();
     void onLoginSuccess(const QString& token);
+  void onVpnConnected(const QString& endpoint);
     //void onLoginResult(bool ok, const UserSession& session, const QString& err);
     void onVpnConfFetched(bool success, const VpnConfig& config, const QString& errorMsg);
     void onUnauthorized();
@@ -50,4 +51,6 @@ private:
 	// In private slots:
 	void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
 	void toggleWindowVisibility();
+
+	void adjustRoutes(const QString& endpoint);
 };

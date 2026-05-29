@@ -1,4 +1,4 @@
-#include "LoginWidget.h"
+﻿#include "LoginWidget.h"
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QKeyEvent>
@@ -86,11 +86,11 @@ void LoginWidget::setupUi() {
     captchaRow->addWidget(m_captchaImageLabel);
 
     // Error label
-    m_errorLabel = new QLabel(m_formPanel);
-    m_errorLabel->setObjectName("ErrorLabel");
-    m_errorLabel->setWordWrap(true);
-	//m_errorLabel->setVisible(false);
-    //m_errorLabel->setFixedHeight(20);
+    m_msgLabel = new QLabel(m_formPanel);
+    m_msgLabel->setObjectName("msgLabel");
+    m_msgLabel->setWordWrap(true);
+	//m_msgLabel->setVisible(false);
+    //m_msgLabel->setFixedHeight(20);
 
     // Login button
     m_loginBtn = new QPushButton("登 录", m_formPanel);
@@ -140,7 +140,7 @@ QProgressBar::chunk {
 
     vl->addWidget(m_loginBtn);
     vl->addLayout(optRow);
-    vl->addWidget(m_errorLabel);
+    vl->addWidget(m_msgLabel);
 }
 
 void LoginWidget::showEvent(QShowEvent* event) {
@@ -180,7 +180,7 @@ void LoginWidget::showEvent(QShowEvent* event) {
       //                 m_captchaEdit->setVisible(false);
       //             }
       //         } else {
-      //             showError("验证码加载失败，请检查网络连接。");
+      //             showMsg("验证码加载失败，请检查网络连接。", true);
       //         }
 			//});
     }
@@ -227,7 +227,7 @@ void LoginWidget::setupConnections() {
 	//connect(m_captchaImageLabel, &ClickableLabel::clicked, this, &LoginWidget::refreshCaptcha);
 	connect(m_captchaImageLabel, &ClickableLabel::clicked,
 		this, [this]() {
-			this->showError({});
+			this->showMsg({});
 			this->refreshCaptcha();
 		});
 
@@ -257,16 +257,22 @@ void LoginWidget::setLoading(bool on) {
     }
 }
 
-void LoginWidget::showError(const QString& msg) {
-    m_errorLabel->setText(msg);
-    // m_errorLabel->setVisible(!msg.isEmpty());
+void LoginWidget::showMsg(const QString& msg, bool isError) {
+    m_msgLabel->setText(msg);
+    if(isError) {
+        m_msgLabel->setStyleSheet("color: #D32F2F;"); // 红色
+		setLoading(false);
+    } else {
+        m_msgLabel->setStyleSheet("color: #388E3C;"); // 绿色
+	}
+    // m_msgLabel->setVisible(!msg.isEmpty());
 }
 
 void LoginWidget::clearFields() {
     m_userEdit->clear();
     m_passEdit->clear();
     if (m_captchaEdit) m_captchaEdit->clear();
-    showError({});
+    showMsg({});
     setLoading(false);
     m_userEdit->setFocus();
     refreshCaptcha();
@@ -282,12 +288,12 @@ void LoginWidget::onLoginClicked()
     if (user.isEmpty() || pass.isEmpty()) return;
 
     if (m_captchaEnabled && captcha.isEmpty()) {
-        showError("请输入验证码");
+        showMsg("请输入验证码", true);
         return;
     }
 
-    //showError({});
     setLoading(true);
+	showMsg("正在登录...");
 
     NetworkManager::instance().login(
         user,
@@ -298,16 +304,17 @@ void LoginWidget::onLoginClicked()
 }
 
 void LoginWidget::onLoginFinished(bool success, const QString& token, const QString& errorMsg) {
-    setLoading(false);
+    // don't stop loading immediately, wait for vpn connection
+    //setLoading(false);
 
     if (!success) {
-        showError(errorMsg.isEmpty() ? "登录失败" : errorMsg);
+        showMsg(errorMsg.isEmpty() ? "登录失败" : errorMsg, true);
         refreshCaptcha();
         return;
     }
 
     // 登录成功
-    showError({});
+    showMsg("登录成功");
 
     // TODO
     qDebug() << "Login success, token =" << token;
@@ -349,7 +356,7 @@ void LoginWidget::onCaptchaFetched(bool success,
     stopCaptchaLoading();                     // 无论成功失败都停止加载动画
 
     if (!success) {
-        showError(errorMsg.isEmpty() ? "获取验证码失败" : errorMsg);
+        showMsg(errorMsg.isEmpty() ? "获取验证码失败" : errorMsg, true);
         return;
     }
 
@@ -381,10 +388,10 @@ void LoginWidget::onCaptchaFetched(bool success,
         m_captchaEdit->setVisible(true);
         m_captchaEdit->clear();
 
-        //showError({});
+        showMsg({});
         onFieldsChanged();
     } else {
-        showError("验证码图片解码失败");
+        showMsg("验证码图片解码失败", true);
     }
 }
 

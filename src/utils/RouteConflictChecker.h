@@ -29,4 +29,6 @@ struct RouteCheckResult {
 /// @returns              RouteCheckResult — inspect .hasConflicts() before applying config
 [[nodiscard]] RouteCheckResult checkRouteConflicts(
     const QString& ifaceAddress,
-    const QStringList& allowedIPs);
+    const QStringList& allowedIPs,
+	bool skipDefaultRouteCheck = true
+    );

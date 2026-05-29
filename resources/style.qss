@@ -346,10 +346,9 @@ QCheckBox::indicator:checked {
     color: #FF4D4F;
 }
 
-#ErrorLabel {
+#msgLabel {
     font-size: 12px;
     font-weight: 400;
-    color: #FF4D4F;
 }
 
 /* ── Spinner / progress bar ───────────────────────────────────────────────── */

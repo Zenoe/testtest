@@ -176,12 +176,25 @@ namespace {
 
 RouteCheckResult checkRouteConflicts(
     const QString& ifaceAddress,
-    const QStringList& allowedIPs)
+    const QStringList& allowedIPs,
+	bool skipDefaultRouteCheck /* = true */
+)
 {
     spdlog::info("[RouteCheck] Starting route conflict check");
     spdlog::debug("[RouteCheck] iface.address  = '{}'", ifaceAddress.toStdString());
-    for (const auto& ip : allowedIPs)
+    for (const auto& ip : allowedIPs) {
         spdlog::debug("[RouteCheck] allowedIP      = '{}'", ip.toStdString());
+        if (ip == "0.0.0.0/0" || ip == "::/0") {
+            if (skipDefaultRouteCheck) {
+                spdlog::warn("[RouteCheck] Skipping default route CIDR '{}', as it would always conflict", ip.toStdString());
+                return {};
+            }
+            else {
+                spdlog::warn("[RouteCheck] Default route CIDR '{}' will be checked, which will likely result in a conflict", ip.toStdString());
+                return RouteCheckResult{ { { ip, "(n/a)", ip, "peer.allowedIPs" } } };
+            }
+        }
+    }
 
     // ── 1. Parse the WireGuard CIDRs we need to protect ──────────────────────
 

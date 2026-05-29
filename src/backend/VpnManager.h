@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <QObject>
 #include <QString>
 #include "ExitCodes.h"
@@ -20,7 +20,7 @@ class VpnManager : public QObject {
 public:
     static VpnManager& instance();
 
-    void connectVpn(const QString& confPath);
+    void connectVpn(const QString& endpoint, const QString& confPath);
     void disconnectVpn(const QString& confPath);
 
 signals:

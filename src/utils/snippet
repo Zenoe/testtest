@@ -1,0 +1,82 @@
+﻿// vpn_session_manager.cpp  (relevant wiring only)
+
+void VpnSessionManager::startMonitoring(const VpnConfig& config)
+{
+    Q_ASSERT(!m_monitorThread);
+
+    auto* monitor = new RouteMonitor(config.iface.address,
+                                     config.peer.allowedIPs);
+    auto* thread  = new QThread(this);
+    monitor->moveToThread(thread);
+
+    connect(thread,  &QThread::started,
+            monitor, &RouteMonitor::start);
+
+    // Clean shutdown: when the thread finishes, delete the monitor
+    connect(thread,  &QThread::finished,
+            monitor, &QObject::deleteLater);
+
+    connect(monitor, &RouteMonitor::routeConflictDetected,
+            this,    &VpnSessionManager::onRouteConflict,
+            Qt::QueuedConnection);    // crosses thread boundary
+
+    connect(monitor, &RouteMonitor::routeConflictResolved,
+            this,    &VpnSessionManager::onRouteConflictResolved,
+            Qt::QueuedConnection);
+
+    connect(monitor, &RouteMonitor::monitoringError,
+            this,    &VpnSessionManager::onMonitoringError,
+            Qt::QueuedConnection);
+
+    m_monitor       = monitor;
+    m_monitorThread = thread;
+    thread->start();
+}
+
+void VpnSessionManager::stopMonitoring()
+{
+    if (!m_monitorThread) return;
+
+    m_monitor->stop();          // cancels WaitForSingleObject
+    m_monitorThread->quit();
+    m_monitorThread->wait();
+    m_monitorThread->deleteLater();
+    m_monitorThread = nullptr;
+    m_monitor       = nullptr;  // deleted via finished→deleteLater
+}
+
+void VpnSessionManager::onRouteConflict(QList<RouteConflict> conflicts)
+{
+    spdlog::error("[VpnSession] Route conflict detected post-activation:");
+    for (const auto& c : conflicts) {
+        spdlog::error("  {} (gw {}) conflicts with {} [{}]",
+                      c.existingNetwork.toStdString(),
+                      c.existingGateway.toStdString(),
+                      c.conflictingCidr.toStdString(),
+                      c.source.toStdString());
+    }
+    // e.g. emit signal up to MainWindow to show a warning banner
+    emit routeConflictWarning(conflicts);
+}
+
+// The cleanest pattern — get LUID right after the tunnel is created,
+// carry it through the session lifetime.
+
+try {
+    // WireGuard tunnel name == adapter friendly name
+    const NET_LUID ifaceLuid = luidFromAdapterName(config.iface.name);
+
+    // Conflict check before apply
+    const RouteCheckResult check =
+        checkRouteConflicts(config.iface.address, config.peer.allowedIPs);
+    if (check.hasConflicts()) { /* handle */ return; }
+
+    applyVpnConfig(config);
+
+    // Start monitor, passing the LUID so it can scope checks to this adapter
+    startMonitoring(config, ifaceLuid);
+
+} catch (const std::system_error& ex) {
+    spdlog::error("[VPN] Failed to resolve adapter LUID: {} ({})",
+                  ex.what(), ex.code().value());
+}

@@ -17,6 +17,8 @@
 #include <QMessageBox>
 #include "utils/logger.h"
 
+#include "utils/RouteManager.h"
+
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setupUi();
     // setupTray();
@@ -52,101 +54,6 @@ void MainWindow::setupUi() {
 
     addTestButtons();
 }
-void MainWindow::addTestButtons() {
-    spdlog::info("addTestButton");
-    QToolBar* testToolbar = new QToolBar("Test Controls", this);
-    testToolbar->setAllowedAreas(Qt::TopToolBarArea);
-    addToolBar(Qt::TopToolBarArea, testToolbar);
-
-    // Add spacing to push buttons to the right (optional)
-    auto* spacer = new QWidget(this);
-    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    testToolbar->addWidget(spacer);
-
-    auto* btnVpn = new QPushButton("vpn start", this);
-    btnVpn->setFixedHeight(30);
-    QObject::connect(btnVpn, &QPushButton::clicked, this, [this]() {
-        connect(&VpnManager::instance(), &VpnManager::connected,
-            this, [this](const QString&) {
-				spdlog::info("VPN connected successfully");
-            });
-
-        connect(&VpnManager::instance(), &VpnManager::errorOccurred,
-            this, [this](const QString& ctx, const QString& detail) {
-                QMessageBox::critical(this, "VPN Error",
-                    QString("Failed at step [%1]: %2").arg(ctx, detail));
-            });
-
-        const QString confPath = SessionManager::instance().vpnConf();
-        VpnManager::instance().connectVpn(confPath);
-        });
-    testToolbar->addWidget(btnVpn);
-
-    auto* btnDisVpn = new QPushButton("vpn stop", this);
-    btnDisVpn->setFixedHeight(30);
-    QObject::connect(btnDisVpn, &QPushButton::clicked, this, [this]() {
-        connect(&VpnManager::instance(), &VpnManager::disconnected,
-            this, [this](const QString&) {
-                // todo stop status thread polling
-				spdlog::info("VPN disconnected");
-            });
-
-        connect(&VpnManager::instance(), &VpnManager::errorOccurred,
-            this, [this](const QString& ctx, const QString& detail) {
-                QMessageBox::critical(this, "VPN Error",
-                    QString("Failed at step [%1]: %2").arg(ctx, detail));
-            });
-
-        const QString confPath = SessionManager::instance().vpnConf();
-        VpnManager::instance().disconnectVpn(confPath);
-        });
-    testToolbar->addWidget(btnDisVpn);
-    auto* btnServer = new QPushButton("Server Config", this);
-    btnServer->setFixedHeight(30);
-    QObject::connect(btnServer, &QPushButton::clicked, this, [this]() {
-        //m_stack->setCurrentIndex(0);
-        spdlog::info("Switched to Server Config view");
-        });
-    testToolbar->addWidget(btnServer);
-
-    // Test button 2: Switch to Login view
-    auto* btnLogin = new QPushButton("Login", this);
-    btnLogin->setFixedHeight(30);
-    QObject::connect(btnLogin, &QPushButton::clicked, [this]() {
-        m_stack->setCurrentIndex(1);
-        spdlog::info("Switched to Login view");
-        });
-    testToolbar->addWidget(btnLogin);
-
-    // Test button 3: Switch to App Grid view
-    auto* btnAppGrid = new QPushButton("App Grid", this);
-    btnAppGrid->setFixedHeight(30);
-    QObject::connect(btnAppGrid, &QPushButton::clicked, [this]() {
-        m_stack->setCurrentIndex(2);
-        spdlog::info("Switched to App Grid view");
-        });
-    testToolbar->addWidget(btnAppGrid);
-
-    // Test button 4: Simulate server config change (emit signal example)
-    auto* btnSimulate = new QPushButton("Simulate Config", this);
-    btnSimulate->setFixedHeight(30);
-    QObject::connect(btnSimulate, &QPushButton::clicked, [this]() {
-        // Example: Emit a signal if widgets have appropriate signals
-        spdlog::warn("Simulated server configuration change");
-        // You could trigger mock data here
-        });
-    testToolbar->addWidget(btnSimulate);
-
-    // Optional: Add a separator and close button to remove test toolbar
-    testToolbar->addSeparator();
-    auto* btnClose = new QPushButton("✕", this);
-    btnClose->setFixedHeight(30);
-    QObject::connect(btnClose, &QPushButton::clicked, [testToolbar]() {
-        testToolbar->hide();
-        spdlog::info("Test toolbar hidden");
-        });
-    testToolbar->addWidget(btnClose);
-}
 
 void MainWindow::setupConnections() {
     // ServerConfigWidget signals
@@ -166,7 +73,7 @@ void MainWindow::setupConnections() {
     // NetworkManager callbacks
     auto& net = NetworkManager::instance();
     connect(&net, &NetworkManager::serverError, this, [this](const QString& errMsg) {
-        m_login->showError(errMsg);
+        m_login->showMsg(errMsg, true);
         });
     connect(&net, &NetworkManager::connectivityResult,
             m_serverCfg, &ServerConfigWidget::onTestResult);
@@ -236,8 +143,10 @@ void MainWindow::onTestConnection() {
 }
 
 void MainWindow::onLoginSuccess(const QString& token) {
-    const QString confPath = SessionManager::instance().vpnConf();
+	m_login->showMsg("登录成功，正在连接VPN...");
     NetworkManager::instance().fetchVpnConf();
+
+    //const QString confPath = SessionManager::instance().vpnConfPath();
     // VpnManager::instance().connectVpn(confPath);
     // switchToPage(2);
     // NetworkManager::instance().fetchAppList(token);
@@ -247,41 +156,50 @@ void MainWindow::onVpnConfFetched(bool success, const VpnConfig& config, const Q
 {
     if (!success) {
       spdlog::error("Failed to fetch VPN config: {}", errorMsg.toStdString());
-      m_login->showError("vpn配置获取失败");
+      m_login->showMsg("vpn配置获取失败", true);
       return;
     }
     // const QString confPath = QStandardPaths::writableLocation(
     //     QStandardPaths::AppDataLocation)
     //     + "/clientx.conf";
 
-    const QString confPath = SessionManager::instance().vpnConf();
-    // if (!config.writeVpnConfig(confPath)) {
-    //   spdlog::error("Failed to write VPN config to '{}'", confPath.toStdString());
-    //   return;
-    // }
+    const QString confPath = SessionManager::instance().vpnConfPath();
+     if (!config.writeVpnConfig(confPath)) {
+       spdlog::error("Failed to write VPN config to '{}'", confPath.toStdString());
+       return;
+     }
+
+     // save allowered ips
+     SessionManager::instance().setVpnConf(config.peer.endpoint, config.iface.address, config.peer.allowedIPs);
 
     spdlog::debug("fetchVpnConf: config written to '{}'", confPath.toStdString());
     connect(&VpnManager::instance(), &VpnManager::connected,
-            this, [this](const QString&) {
-                switchToPage(2);
-                NetworkManager::instance().fetchSandBoxConf();
-            }, Qt::SingleShotConnection);
+            this, &MainWindow::onVpnConnected, Qt::SingleShotConnection);
 
     connect(&VpnManager::instance(), &VpnManager::errorOccurred,
             this, [this](const QString& ctx, const QString& detail) {
                 QMessageBox::critical(this, "VPN Error",
                     QString("Failed at step [%1]: %2").arg(ctx, detail));
             }, Qt::SingleShotConnection);
-	VpnManager::instance().connectVpn(confPath);
+    VpnManager::instance().connectVpn(config.peer.endpoint, confPath);
+}
+
+void MainWindow::onVpnConnected(const QString& endpoint ){
+	m_login->showMsg("VPN连接成功，正在资源配置...");
+    // adjust route table entries
+    adjustRoutes(endpoint);
+	switchToPage(2);
+	m_login->setLoading(false);
+	NetworkManager::instance().fetchSandBoxConf();
 }
 
 void MainWindow::onUnauthorized(){
-  m_login->showError("权限不足");
+  m_login->showMsg("权限不足", true);
 }
 
 void MainWindow::onLogout() {
 	spdlog::info("logout");
-    const QString confPath = SessionManager::instance().vpnConf();
+    const QString confPath = SessionManager::instance().vpnConfPath();
 
     connect(&VpnManager::instance(), &VpnManager::disconnected,
         this, [this](const QString&) {
@@ -392,4 +310,41 @@ void MainWindow::closeEvent(QCloseEvent* event)
     } else {
         event->accept();   // no tray? close normally
     }
+}
+
+void MainWindow::adjustRoutes(const QString& endpoint ) {
+    const QString vpnConfPath = SessionManager::instance().vpnConfPath();
+    const QString ifalias = QFileInfo(vpnConfPath).baseName();
+    uint attempts = 5;
+	std::optional<NET_LUID> ifaceLuid;
+    for (int i = 0; i < attempts; ++i) {
+		Sleep(200);  
+        const std::optional<NET_LUID> ifaceLuidTemp = luidFromAdapterAlias(ifalias);
+        if(ifaceLuidTemp.has_value()) {
+            ifaceLuid = ifaceLuidTemp;
+            spdlog::debug("Found interface LUID: {} for alias '{}'", ifaceLuid->Value, ifalias.toStdString());
+            break;
+		}
+    }
+
+    if(!ifaceLuid.has_value()) {
+        spdlog::error("Failed to find interface for VPN config '{}'", vpnConfPath.toStdString());
+        return;
+	}
+    auto result = SessionManager::instance().getVpnConf(endpoint);
+
+    if (result.has_value()) {
+        const auto& vpnPair = result.value();
+        const QString& peerIP = vpnPair.first;
+        const QStringList& allowedIPs = vpnPair.second;
+
+        // Full WireGuard cleanup — best-effort, returns false if anything failed
+        if (!deleteWireGuardRoutes(peerIP, allowedIPs, ifaceLuid.value())) {
+            // warn user, flag for manual cleanup, etc.
+        }
+        // Use the values
+        qDebug() << "Peer IP:" << peerIP;
+        qDebug() << "Allowed IPs:" << allowedIPs;
+    }
+
 }

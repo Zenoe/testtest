@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <QWidget>
 #include <QLabel>
 #include <QLineEdit>
@@ -14,7 +14,7 @@ public:
     explicit LoginWidget(QWidget* parent = nullptr);
 
     void setLoading(bool on);
-    void showError(const QString& msg);
+    void showMsg(const QString& msg, bool isError = false);
     void clearFields();
 
 protected:
@@ -58,7 +58,7 @@ private:
     /* QWidget* m_overlayContainer = nullptr; */
     // Right panel – form
     QLabel*       m_titleLabel;
-    QLabel*       m_errorLabel;
+    QLabel*       m_msgLabel;
     QLineEdit*    m_userEdit;
     QLineEdit*    m_passEdit;
     QPushButton*  m_loginBtn;

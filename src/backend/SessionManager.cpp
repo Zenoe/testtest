@@ -1,4 +1,4 @@
-#include "SessionManager.h"
+﻿#include "SessionManager.h"
 #include <QSettings>
 
 // QSettings key constants — centralised to avoid typo-driven bugs
@@ -55,7 +55,7 @@ QString SessionManager::username() const {
     return m_session.username;
 }
 
-QString SessionManager::vpnConf() const {
+QString SessionManager::vpnConfPath() const {
     return m_session.getVpnConf();
 }
 UserSession SessionManager::session() const {
@@ -63,6 +63,26 @@ UserSession SessionManager::session() const {
 }
 
 // ── Persistence ───────────────────────────────────────────────────────────────
+
+void SessionManager::setVpnConf(const QString &endpoint, const QString &ifaddr, const QStringList &allowedIPs) {
+    // Using std::move physically transfers the data from the parameters into the map,
+    // resulting in ZERO allocations and ZERO deep copies.
+    m_session.vpnConfMap[std::move(endpoint)] = qMakePair(std::move(ifaddr), std::move(allowedIPs));
+}
+
+std::optional<QPair<QString, QStringList>> SessionManager::getVpnConf(const QString& endpoint) const
+{
+    auto it = m_session.vpnConfMap.find(endpoint);
+    if (it != m_session.vpnConfMap.end()) {
+        return it.value();
+    }
+    return std::nullopt;
+}
+
+void SessionManager::setInstalledRow(MIB_IPFORWARD_ROW2 row) {
+   // Store the installed row for later cleanup
+	m_session.installedRow = row;
+}
 
 void SessionManager::persistAutoLogin() {
     QSettings s;

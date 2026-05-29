@@ -48,6 +48,7 @@ qt_add_executable(Revelation
     src/main.cpp
     src/app/Application.cpp
     src/ui/MainWindow.cpp
+    src/ui/MainWindow.test.cpp
     src/ui/navigation/NavigationWidget.cpp
     src/ui/navigation/NavItem.cpp
     src/ui/pages/ServerConfigWidget.cpp
@@ -68,6 +69,11 @@ qt_add_executable(Revelation
     src/utils/logger.cpp
     src/utils/ConfigManager.h
     src/utils/ConfigManager.cpp
+    src/utils/RouteManager.h
+    src/utils/RouteManager.cpp
+    src/utils/RouteMonitor.h
+    src/utils/RouteMonitor.cpp
+    
     src/utils/stringutil.h
     src/utils/RouteConflictChecker.cpp
     src/models/UserSession.h
@@ -76,6 +82,9 @@ qt_add_executable(Revelation
     src/vpn/driver.cpp
     src/vpn/StatusPanel.h
     src/vpn/StatusPanel.cpp
+
+
+    src/test/test.cpp
     ${COMMON_SOURCES}
     app.qrc
 )

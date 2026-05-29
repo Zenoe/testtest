@@ -1,4 +1,4 @@
-#include "VpnManager.h"
+﻿#include "VpnManager.h"
 
 #include <QCoreApplication>
 #include <QFileInfo>
@@ -60,7 +60,7 @@ CmdResult VpnManager::runServiceCommand(const QString& serviceExe,
     return { code, output };
 }
 
-void VpnManager::connectVpn(const QString& confPath) {
+void VpnManager::connectVpn(const QString& endpoint, const QString& confPath) {
     const QString exe         = serviceExePath();
     const QString serviceName = serviceNameFrom(confPath);
 
@@ -80,7 +80,12 @@ void VpnManager::connectVpn(const QString& confPath) {
         spdlog::info("[VPN] connectVpn | tunnel was already running");
 
     spdlog::info("[VPN] connectVpn | tunnel up: {}", serviceName.toStdString());
-    emit connected(serviceName);
+    //emit connected(serviceName);
+    // Qt way — check the return value
+    if (!QFile::remove(confPath)) {
+      spdlog::warn("[VPN] failed to delete: {}", confPath.toStdString());
+    }
+    emit connected(endpoint);
 }
 
 void VpnManager::disconnectVpn(const QString& confPath) {
