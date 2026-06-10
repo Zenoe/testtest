@@ -250,6 +250,8 @@ void MainWindow::onAppQuit()
 
 void MainWindow::setupTray()
 {
+    // One gotcha on Windows : QSystemTrayIcon::isSystemTrayAvailable() can return false briefly at login.If you launch at startup, wrap setupTray() with a check or a short QTimer::singleShot delay(500 ms) to let the shell finish loading before creating the tray icon.
+
     // --- Icon: use your app resource, or fall back to a built-in Qt icon ---
     const QIcon appIcon = QIcon(":/tray.ico");   // adjust path
     // const QIcon appIcon = QApplication::style()->standardIcon(QStyle::SP_ComputerIcon);

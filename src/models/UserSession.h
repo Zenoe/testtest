@@ -56,7 +56,7 @@ private:
     //name = generateRandomString(16) + ".conf";
     //settings.setValue("confFileName", name);
     //}
-    //return  "C:/Users/2004l/Downloads/clientxt.conf";
+    return  "C:/Users/2004l/Downloads/clientxt.conf";
 
     QString name = "XY" + generateRandomString(16) + ".conf";
     /* name = "XY123.conf"; */
