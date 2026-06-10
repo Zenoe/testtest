@@ -30,7 +30,7 @@ class StatusPanel : public QWidget
     Q_OBJECT
 
 public:
-    explicit StatusPanel(const QString& configFile, QWidget* parent = nullptr);
+    explicit StatusPanel(const QString& adapterName, QWidget* parent = nullptr);
     ~StatusPanel() override;
 
 public slots:
@@ -53,7 +53,7 @@ private:
     void stopPoller();
     static QString formatBytes(quint64 bytes);
 
-    QString          m_configFile;
+    QString          m_adapterName;
 
     QLabel*          m_rxValue     = nullptr;
     QLabel*          m_txValue     = nullptr;
@@ -71,7 +71,7 @@ class StatusPoller : public QObject
     Q_OBJECT
 
 public:
-    explicit StatusPoller(const QString& configFile, QObject* parent = nullptr);
+    explicit StatusPoller(const QString& adapterName, QObject* parent = nullptr);
 
 public slots:
     void start();
@@ -85,8 +85,10 @@ private slots:
     void poll();
 
 private:
-    QString  m_configFile;
+    QString  m_adapterName;
     QTimer*  m_timer   = nullptr;
     bool     m_running = false;
+    quint32  m_consecutiveFailures = 0;
+    QString  m_lastError;
     static QString formatHandshake(quint64 lastHandshakeMsec);
 };

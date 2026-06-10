@@ -7,8 +7,6 @@
 # because this file is included via add_subdirectory() from the root.
 # The root project governs version, language, and C++ standard.
 
-add_definitions(-DUNICODE -D_UNICODE)
-
 # ── Dependencies ─────────────────────────────────────────────────────────────
 find_package(Qt6 REQUIRED COMPONENTS Core)
 find_package(spdlog CONFIG REQUIRED)
@@ -22,20 +20,30 @@ add_executable(xyreService
     ControllerService.cpp
     slogger.h
     slogger.cpp
-    #tunnel/Driver.h
-    #tunnel/Driver.cpp
+    tunnel/Driver.h
+    tunnel/Driver.cpp
+    tunnel/WireGuardTypes.h
     # PipeServer.cpp
     # CommandDispatcher.cpp
 )
 
 target_include_directories(xyreService PRIVATE
     ${CMAKE_SOURCE_DIR}/common
+    ${CMAKE_CURRENT_SOURCE_DIR}/tunnel
+)
+
+target_compile_definitions(xyreService PRIVATE
+    UNICODE
+    _UNICODE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
 )
 
 target_link_libraries(xyreService PRIVATE
     Qt6::Core
     advapi32
     spdlog::spdlog
+    ws2_32
 )
 if(MSVC)
     target_link_options(xyreService PRIVATE "/MANIFESTUAC:level='asInvoker'")

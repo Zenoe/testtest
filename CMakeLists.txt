@@ -80,8 +80,6 @@ qt_add_executable(Revelation
     src/utils/RouteConflictChecker.cpp
     src/models/UserSession.h
     src/models/VpnConf.cpp
-    src/vpn/driver.h
-    src/vpn/driver.cpp
     src/vpn/StatusPanel.h
     src/vpn/StatusPanel.cpp
 

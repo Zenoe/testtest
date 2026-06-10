@@ -25,9 +25,17 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
-#include "utils/logger.h"
+#include "Win32Log.h"
 
 #pragma comment(lib, "ws2_32.lib") 
+namespace {
+void LOG_WIN32_ERROR(const char* context)
+{
+    const DWORD error = GetLastError();
+    spdlog::error("{} | code={} ({})", context, error, win32_error_str(error));
+}
+}
+
 namespace Tunnel {
 
     HostAddress HostAddress::fromIPv4(uint32_t hostOrder) noexcept
@@ -251,7 +259,7 @@ namespace Tunnel {
                     "WireGuardOpenAdapter(\"" + wToUtf8(name) + "\"): error="
                     + std::to_string(::GetLastError()));
             }
-            spdlog::info("WireGuardOpenAdapter: \"{}\" ok", wToUtf8(name));
+            spdlog::trace("WireGuardOpenAdapter: \"{}\" ok", wToUtf8(name));
             return Adapter{ h };
         }
 
@@ -275,7 +283,7 @@ namespace Tunnel {
         {
             if (m_handle && m_handle != INVALID_HANDLE_VALUE) {
                 getDll().closeAdapter(m_handle);
-                spdlog::debug("WireGuardCloseAdapter: handle={:p}", m_handle);
+                spdlog::trace("WireGuardCloseAdapter: handle={:p}", m_handle);
             }
         }
 
@@ -383,7 +391,7 @@ namespace Tunnel {
                     const DWORD used = (needed > 0) ? needed : m_lastGetGuess;
                     m_lastGetGuess = std::max(used, m_lastGetGuess);
                     buf.resize(used);
-                    spdlog::debug("WireGuardGetConfiguration: {} bytes", used);
+                    spdlog::trace("WireGuardGetConfiguration: {} bytes", used);
                     break;
                 }
 
@@ -429,7 +437,7 @@ namespace Tunnel {
 
             const uint32_t peersCount = ioctlIface.PeersCount;
             iface.peers.reserve(peersCount);
-            spdlog::debug("GetConfiguration: parsing {} peer(s)", peersCount);
+            spdlog::trace("GetConfiguration: parsing {} peer(s)", peersCount);
 
             ptr = advance(bufBegin, sizeof(IoctlInterface), bufEnd, "first IoctlPeer");
             const auto* ioctlPeer = reinterpret_cast<const IoctlPeer*>(ptr);
@@ -495,7 +503,7 @@ namespace Tunnel {
                     ++ioctlAIP;
                 }
 
-                spdlog::debug("GetConfiguration: peer[{}] tx={} rx={} aips={}",
+                spdlog::trace("GetConfiguration: peer[{}] tx={} rx={} aips={}",
                     i, peer.txBytes, peer.rxBytes, peer.allowedIPs.size());
 
                 iface.peers.push_back(std::move(peer));

@@ -1,5 +1,5 @@
 #include "StatusPanel.h"
-#include "Driver.h"
+#include "backend/ControlServiceClient.h"
 
 #include <QApplication>
 #include <QGraphicsDropShadowEffect>
@@ -63,9 +63,9 @@ QPushButton#closeBtn:pressed {
     background: rgba(255, 255, 255, 0.16);
 }
 )";
-StatusPanel::StatusPanel(const QString& configFile, QWidget* parent)
+StatusPanel::StatusPanel(const QString& adapterName, QWidget* parent)
     : QWidget(parent, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint)
-    , m_configFile(configFile)
+    , m_adapterName(adapterName)
 {
     //setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose, false);
@@ -252,7 +252,7 @@ void StatusPanel::startPoller()
         return;   // already running
 
     m_thread = new QThread(this);
-    m_poller = new StatusPoller(m_configFile);   // no Qt parent — moved to thread
+    m_poller = new StatusPoller(m_adapterName);   // no Qt parent — moved to thread
     m_poller->moveToThread(m_thread);
 
     // Poller → panel  (queued: crosses thread boundary automatically)
@@ -330,9 +330,9 @@ QString StatusPanel::formatBytes(quint64 bytes)
 // ============================================================
 //  StatusPoller
 // ============================================================
-StatusPoller::StatusPoller(const QString& configFile, QObject* parent)
+StatusPoller::StatusPoller(const QString& adapterName, QObject* parent)
     : QObject(parent)
-    , m_configFile(configFile)
+    , m_adapterName(adapterName)
 {
 }
 
@@ -396,24 +396,31 @@ void StatusPoller::poll()
     if (!m_running)
         return;
 
-    try {
-        auto adapter = Tunnel::Driver::Adapter::open(m_configFile.toStdWString());
-        const Tunnel::Interface cfg = adapter.getConfiguration();
-
-        quint64 rx = 0, tx = 0, lastHandshake=0;
-        // only one peer for a client
-        for (const auto& peer : cfg.peers) {
-            rx += static_cast<quint64>(peer.rxBytes);
-            tx += static_cast<quint64>(peer.txBytes);
-            // Most recent handshake across all peers (tunnel is "alive" if any peer is active)
-            lastHandshake = (std::max)(lastHandshake, static_cast<quint64>(peer.lastHandshakeMsec));
+    const TrafficStatsResponse response =
+        ControlServiceClient::queryTraffic(m_adapterName, 2'000);
+    if (response.ok) {
+        if (m_consecutiveFailures > 0) {
+            spdlog::info(
+                "StatusPoller: traffic polling recovered | adapter={} failures={}",
+                m_adapterName.toStdString(), m_consecutiveFailures);
         }
+        m_consecutiveFailures = 0;
+        m_lastError.clear();
+        emit statsReady(response.rxBytes, response.txBytes);
+        return;
+    }
 
-        //spdlog::debug("lastHandshakeMsec: {}", formatHandshake(lastHandshake).toStdString());
-        emit statsReady(rx, tx);
+    ++m_consecutiveFailures;
+    const QString detail = response.detail.isEmpty()
+        ? QStringLiteral("Adapter unavailable")
+        : response.detail;
+    if (m_consecutiveFailures == 1
+        || m_consecutiveFailures % 30 == 0
+        || detail != m_lastError) {
+        spdlog::warn(
+            "StatusPoller: traffic poll failed | adapter={} failures={} error={}",
+            m_adapterName.toStdString(), m_consecutiveFailures, detail.toStdString());
     }
-    catch (const std::exception& ex) {
-        emit errorOccurred(QString::fromStdString(ex.what()));
-        spdlog::debug("StatusPoller::poll failed: {}", ex.what());
-    }
+    m_lastError = detail;
+    emit errorOccurred(detail);
 }

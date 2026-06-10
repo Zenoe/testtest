@@ -76,7 +76,7 @@ void AvatarWidget::showVpnStatus() {
                 m_statusPanel = nullptr;
             });
 
-        spdlog::info("AvatarWidget: StatusPanel created (conf='{}')",
+        spdlog::info("AvatarWidget: StatusPanel created (adapter='{}')",
             QFileInfo(confPath).baseName().toStdString());
     }
 

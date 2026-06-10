@@ -50,7 +50,7 @@ private:
 
 ControlResponse errorResponse(const QString& detail, int code = XyreExitCode::UnexpectedError,
                               DWORD win32 = 0) {
-    return { false, code, win32, detail, {} };
+    return { false, code, win32, detail, {}, {} };
 }
 
 ControlResponse parseResponse(const QByteArray& bytes) {
@@ -60,13 +60,18 @@ ControlResponse parseResponse(const QByteArray& bytes) {
         return errorResponse(QStringLiteral("controller returned an invalid response"));
 
     const QJsonObject response = document.object();
-    return {
+    if (response.value("version").toInt() != XyreControl::kProtocolVersion)
+        return errorResponse(QStringLiteral("controller protocol version mismatch"));
+
+    ControlResponse result{
         response.value("ok").toBool(),
         response.value("code").toInt(XyreExitCode::UnexpectedError),
         static_cast<DWORD>(response.value("win32").toInteger()),
         response.value("detail").toString(),
-        response.value("serviceName").toString()
+        response.value("serviceName").toString(),
+        response
     };
+    return result;
 }
 
 ControlResponse startInstalledController() {
@@ -111,7 +116,7 @@ ControlResponse startInstalledController() {
             QStringLiteral("failed to start installed controller service (win32=%1)").arg(error),
             XyreExitCode::ServiceStartFailed, error);
     }
-    return { true, XyreExitCode::Ok, 0, {}, {} };
+    return { true, XyreExitCode::Ok, 0, {}, {}, {} };
 }
 
 } // namespace
@@ -247,7 +252,7 @@ ControlResponse ControlServiceClient::installElevated(const QString& serviceExeP
             static_cast<int>(exitCode));
     }
 
-    return { true, static_cast<int>(exitCode), 0, {}, {} };
+    return { true, static_cast<int>(exitCode), 0, {}, {}, {} };
 }
 
 ControlResponse ControlServiceClient::ensureAvailable(const QString& serviceExePath) {
@@ -281,7 +286,42 @@ ControlResponse ControlServiceClient::ensureAvailable(const QString& serviceExeP
         QThread::msleep(100);
     }
 
+    response = installElevated(serviceExePath);
+    if (!response.ok)
+        return response;
+
+    timer.restart();
+    while (timer.elapsed() < 5'000) {
+        response = send(ping, 250);
+        if (response.ok)
+            return response;
+        QThread::msleep(100);
+    }
     return errorResponse(
-        QStringLiteral("Xyre controller is installed but not responding; check Windows Services"),
+        QStringLiteral("Xyre controller did not respond after installation or upgrade"),
         XyreExitCode::ServiceStartFailed);
+}
+
+TrafficStatsResponse ControlServiceClient::queryTraffic(const QString& adapterName, int timeoutMs) {
+    const ControlResponse response = send(QJsonObject{
+        { QStringLiteral("command"), QStringLiteral("traffic") },
+        { QStringLiteral("adapterName"), adapterName }
+    }, timeoutMs);
+    if (!response.ok)
+        return { false, 0, 0, 0, response.detail };
+
+    bool rxOk = false;
+    bool txOk = false;
+    bool handshakeOk = false;
+    const quint64 rx = response.payload.value("rxBytes").toString().toULongLong(&rxOk);
+    const quint64 tx = response.payload.value("txBytes").toString().toULongLong(&txOk);
+    const qint64 lastHandshake =
+        response.payload.value("lastHandshakeMsec").toString().toLongLong(&handshakeOk);
+    if (!rxOk || !txOk || !handshakeOk) {
+        return {
+            false, 0, 0, 0,
+            QStringLiteral("controller returned invalid traffic counters")
+        };
+    }
+    return { true, rx, tx, lastHandshake, {} };
 }
