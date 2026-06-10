@@ -74,6 +74,7 @@ private:
     QString m_loginUrl;
 private:
 	bool    m_isFetchingCaptcha = false;   // 防重复点击
+	bool    m_preserveMessageOnCaptchaRefresh = false;
 	QTimer* m_loadingTimer = nullptr;
 	int     m_dotsCount = 0;
 	//QString getServerHost() ;

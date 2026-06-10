@@ -227,16 +227,13 @@ void LoginWidget::setupConnections() {
 	//connect(m_captchaImageLabel, &ClickableLabel::clicked, this, &LoginWidget::refreshCaptcha);
 	connect(m_captchaImageLabel, &ClickableLabel::clicked,
 		this, [this]() {
+			m_preserveMessageOnCaptchaRefresh = false;
 			this->showMsg({});
 			this->refreshCaptcha();
 		});
 
 	// 接收 NetworkManager 的验证码结果
 	connect(&NetworkManager::instance(), &NetworkManager::captchaFetched, this, &LoginWidget::onCaptchaFetched);
-	//connect(m_captchaImageLabel, &ClickableLabel::clicked,
-    //    &NetworkManager::instance(), &NetworkManager::fetchCaptcha);
-    connect(m_captchaEdit, &QLineEdit::textChanged, this, &LoginWidget::onFieldsChanged);
-    connect(&NetworkManager::instance(), &NetworkManager::captchaFetched, this, &LoginWidget::onCaptchaFetched);
     connect(&NetworkManager::instance(), &NetworkManager::loginFinished, this, &LoginWidget::onLoginFinished);
 }
 
@@ -269,6 +266,7 @@ void LoginWidget::showMsg(const QString& msg, bool isError) {
 }
 
 void LoginWidget::clearFields() {
+    m_preserveMessageOnCaptchaRefresh = false;
     m_userEdit->clear();
     m_passEdit->clear();
     if (m_captchaEdit) m_captchaEdit->clear();
@@ -309,11 +307,13 @@ void LoginWidget::onLoginFinished(bool success, const QString& token, const QStr
 
     if (!success) {
         showMsg(errorMsg.isEmpty() ? "登录失败" : errorMsg, true);
+        m_preserveMessageOnCaptchaRefresh = true;
         refreshCaptcha();
         return;
     }
 
     // 登录成功
+    m_preserveMessageOnCaptchaRefresh = false;
     showMsg("登录成功");
 
     // TODO
@@ -356,6 +356,7 @@ void LoginWidget::onCaptchaFetched(bool success,
     stopCaptchaLoading();                     // 无论成功失败都停止加载动画
 
     if (!success) {
+        m_preserveMessageOnCaptchaRefresh = false;
         showMsg(errorMsg.isEmpty() ? "获取验证码失败" : errorMsg, true);
         return;
     }
@@ -366,6 +367,7 @@ void LoginWidget::onCaptchaFetched(bool success,
     if (!captchaEnabled || imgBase64.isEmpty()) {
         m_captchaImageLabel->setVisible(false);
         m_captchaEdit->setVisible(false);
+        m_preserveMessageOnCaptchaRefresh = false;
         onFieldsChanged();
         return;
     }
@@ -388,9 +390,12 @@ void LoginWidget::onCaptchaFetched(bool success,
         m_captchaEdit->setVisible(true);
         m_captchaEdit->clear();
 
-        showMsg({});
+        if (!m_preserveMessageOnCaptchaRefresh)
+            showMsg({});
+        m_preserveMessageOnCaptchaRefresh = false;
         onFieldsChanged();
     } else {
+        m_preserveMessageOnCaptchaRefresh = false;
         showMsg("验证码图片解码失败", true);
     }
 }
