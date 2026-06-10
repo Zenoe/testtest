@@ -44,7 +44,7 @@ protected:
 
 
 private slots:
-    void onStats(quint64 rx, quint64 tx);
+    void onStats(quint64 rx, quint64 tx, qint64 lastHandshakeMsec);
     void onError(const QString& msg);
 
 private:
@@ -52,12 +52,15 @@ private:
     void startPoller();
     void stopPoller();
     static QString formatBytes(quint64 bytes);
+    static QString formatHandshake(qint64 lastHandshakeMsec);
+    void setConnectionState(const QString& text, const QString& state);
 
     QString          m_adapterName;
 
     QLabel*          m_rxValue     = nullptr;
     QLabel*          m_txValue     = nullptr;
     QLabel*          m_statusLabel = nullptr;
+    QLabel*          m_handshakeValue = nullptr;
 
     QThread*         m_thread      = nullptr;
     StatusPoller*  m_poller      = nullptr;
@@ -78,7 +81,7 @@ public slots:
     void stop();
 
 signals:
-    void statsReady(quint64 rx, quint64 tx);
+    void statsReady(quint64 rx, quint64 tx, qint64 lastHandshakeMsec);
     void errorOccurred(const QString& msg);
 
 private slots:
@@ -90,5 +93,4 @@ private:
     bool     m_running = false;
     quint32  m_consecutiveFailures = 0;
     QString  m_lastError;
-    static QString formatHandshake(quint64 lastHandshakeMsec);
 };

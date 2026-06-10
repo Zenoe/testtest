@@ -11,6 +11,7 @@
 #include <Windows.h>
 #include <shellapi.h>
 
+#include <algorithm>
 #include <string>
 
 namespace {
@@ -25,6 +26,18 @@ public:
 
     ScopedHandle(const ScopedHandle&) = delete;
     ScopedHandle& operator=(const ScopedHandle&) = delete;
+    ScopedHandle(ScopedHandle&& other) noexcept : m_handle(other.m_handle) {
+        other.m_handle = INVALID_HANDLE_VALUE;
+    }
+    ScopedHandle& operator=(ScopedHandle&& other) noexcept {
+        if (this != &other) {
+            if (m_handle != nullptr && m_handle != INVALID_HANDLE_VALUE)
+                CloseHandle(m_handle);
+            m_handle = other.m_handle;
+            other.m_handle = INVALID_HANDLE_VALUE;
+        }
+        return *this;
+    }
 
     HANDLE get() const { return m_handle; }
     explicit operator bool() const {
@@ -72,6 +85,13 @@ ControlResponse parseResponse(const QByteArray& bytes) {
         response
     };
     return result;
+}
+
+bool isTransientPipeError(DWORD error) {
+    return error == ERROR_FILE_NOT_FOUND
+        || error == ERROR_PIPE_BUSY
+        || error == ERROR_PIPE_NOT_CONNECTED
+        || error == ERROR_NO_DATA;
 }
 
 ControlResponse startInstalledController() {
@@ -143,28 +163,44 @@ ControlResponse ControlServiceClient::send(const QJsonObject& request, int timeo
     if (payload.size() > static_cast<int>(XyreControl::kMaxMessageBytes))
         return errorResponse(QStringLiteral("controller request is too large"));
 
-    if (!WaitNamedPipeW(XyreControl::kPipeName, static_cast<DWORD>(timeoutMs))) {
-        const DWORD error = GetLastError();
-        return errorResponse(
-            QStringLiteral("controller pipe is unavailable (win32=%1)").arg(error),
-            XyreExitCode::ServiceStartFailed,
-            error);
+    QElapsedTimer deadline;
+    deadline.start();
+    ScopedHandle pipe;
+    DWORD lastError = ERROR_FILE_NOT_FOUND;
+
+    while (deadline.elapsed() < timeoutMs) {
+        const DWORD remaining = static_cast<DWORD>(
+            (std::max)(1, timeoutMs - static_cast<int>(deadline.elapsed())));
+        if (!WaitNamedPipeW(XyreControl::kPipeName, remaining)) {
+            lastError = GetLastError();
+            if (!isTransientPipeError(lastError))
+                break;
+            QThread::msleep(25);
+            continue;
+        }
+
+        pipe = ScopedHandle(CreateFileW(
+            XyreControl::kPipeName,
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            nullptr,
+            OPEN_EXISTING,
+            FILE_FLAG_OVERLAPPED,
+            nullptr));
+        if (pipe)
+            break;
+
+        lastError = GetLastError();
+        if (!isTransientPipeError(lastError))
+            break;
+        QThread::msleep(25);
     }
 
-    ScopedHandle pipe(CreateFileW(
-        XyreControl::kPipeName,
-        GENERIC_READ | GENERIC_WRITE,
-        0,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_FLAG_OVERLAPPED,
-        nullptr));
     if (!pipe) {
-        const DWORD error = GetLastError();
         return errorResponse(
-            QStringLiteral("failed to connect to controller pipe (win32=%1)").arg(error),
+            QStringLiteral("controller pipe is unavailable (win32=%1)").arg(lastError),
             XyreExitCode::ServiceStartFailed,
-            error);
+            lastError);
     }
 
     DWORD mode = PIPE_READMODE_MESSAGE;
@@ -189,7 +225,9 @@ ControlResponse ControlServiceClient::send(const QJsonObject& request, int timeo
         &overlapped);
 
     if (!completed && GetLastError() == ERROR_IO_PENDING) {
-        if (WaitForSingleObject(event.get(), static_cast<DWORD>(timeoutMs)) != WAIT_OBJECT_0) {
+        const DWORD remaining = static_cast<DWORD>(
+            (std::max)(1, timeoutMs - static_cast<int>(deadline.elapsed())));
+        if (WaitForSingleObject(event.get(), remaining) != WAIT_OBJECT_0) {
             CancelIoEx(pipe.get(), &overlapped);
             WaitForSingleObject(event.get(), INFINITE);
             return errorResponse(
