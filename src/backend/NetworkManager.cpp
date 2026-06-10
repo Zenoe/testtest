@@ -1,4 +1,4 @@
-﻿#include "NetworkManager.h"
+#include "NetworkManager.h"
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QJsonDocument>
@@ -392,7 +392,7 @@ void NetworkManager::fetchVpnConf()
     const QString endpoint = QString::fromStdString(
         ConfigManager::instance()
         .get<std::string>("server.vpnconf_endpoint")
-        .value_or("/revelation/user/vpnConfig"));
+        .value_or("/revelation/user/vpnConfig")); // todo when return 500, login ui should reset loading state, and show server unavailable
 
     spdlog::debug("fetchVpnConf: requesting endpoint='{}'", endpoint.toStdString());
 

@@ -83,6 +83,16 @@ void MainWindow::setupConnections() {
     connect(&net, &NetworkManager::appListReady,
             m_appGrid, &AppGridWidget::onAppsReceived);
 
+    auto& vpn = VpnManager::instance();
+    connect(&vpn, &VpnManager::connected, this, &MainWindow::onVpnConnected);
+    connect(&vpn, &VpnManager::errorOccurred,
+            this, [this](const QString& ctx, const QString& detail) {
+                const QString message =
+                    QString("Failed at step [%1]: %2").arg(ctx, detail);
+                m_login->showMsg(message, true);
+                QMessageBox::critical(this, "VPN Error", message);
+            });
+
     // Navigation
     connect(m_nav, &NavigationWidget::itemSelected,
             this, &MainWindow::onNavItemSelected);
@@ -166,6 +176,8 @@ void MainWindow::onVpnConfFetched(bool success, const VpnConfig& config, const Q
     const QString confPath = SessionManager::instance().vpnConfPath();
      if (!config.writeVpnConfig(confPath)) {
        spdlog::error("Failed to write VPN config to '{}'", confPath.toStdString());
+       m_login->showMsg(
+           QString("Failed to write VPN config: %1").arg(confPath), true);
        return;
      }
 
@@ -173,14 +185,6 @@ void MainWindow::onVpnConfFetched(bool success, const VpnConfig& config, const Q
      SessionManager::instance().setVpnConf(config.peer.endpoint, config.iface.address, config.peer.allowedIPs);
 
     spdlog::debug("fetchVpnConf: config written to '{}'", confPath.toStdString());
-    connect(&VpnManager::instance(), &VpnManager::connected,
-            this, &MainWindow::onVpnConnected, Qt::SingleShotConnection);
-
-    connect(&VpnManager::instance(), &VpnManager::errorOccurred,
-            this, [this](const QString& ctx, const QString& detail) {
-                QMessageBox::critical(this, "VPN Error",
-                    QString("Failed at step [%1]: %2").arg(ctx, detail));
-            }, Qt::SingleShotConnection);
     VpnManager::instance().connectVpn(config.peer.endpoint, confPath);
 }
 

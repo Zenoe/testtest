@@ -4,7 +4,9 @@
 
 #include <stdexcept>
 #include <string>
+#include <algorithm>
 #include <spdlog/spdlog.h>
+#include <QFileInfo>
 
 // ── tunnel.dll export signature ─────────────────────────────────────────────
 using WireGuardTunnelServiceFn = BOOL(WINAPI*)(LPCWSTR configFile);
@@ -105,6 +107,15 @@ ServiceResult Service::add(const QString& serviceName,
 {
     spdlog::info("[Service] add | name={}", serviceName.toStdString());
 
+    const QFileInfo confInfo(configFile);
+    if (!confInfo.exists() || !confInfo.isFile() || !confInfo.isReadable()) {
+        return {
+            ServiceResult::Status::Failed,
+            ERROR_FILE_NOT_FOUND,
+            QStringLiteral("config does not exist or is not readable: %1").arg(configFile)
+        };
+    }
+
     ScmHandle hSCM = openSCM(SC_MANAGER_ALL_ACCESS);
     if (!hSCM) {
         const DWORD err = GetLastError();
@@ -156,7 +167,7 @@ ServiceResult Service::start(const QString& serviceName)
         LOG_WIN32_ERROR("SC_MANAGER_CONNECT");
         return ServiceResult::fromWin32(err, "openSCM");
     }
-    ScmHandle hSvc = openService(hSCM, serviceName, SERVICE_START);
+    ScmHandle hSvc = openService(hSCM, serviceName, SERVICE_START | SERVICE_QUERY_STATUS);
 
     if (!hSvc) {
         const DWORD err = GetLastError();
@@ -169,8 +180,51 @@ ServiceResult Service::start(const QString& serviceName)
         return ServiceResult::fromWin32(err, "start: " + serviceName);
     }
 
-    spdlog::info("[Service] start | OK: {}", serviceName.toStdString());
-    return ServiceResult::success();
+    SERVICE_STATUS_PROCESS status{};
+    DWORD bytesNeeded = 0;
+    const ULONGLONG deadline = GetTickCount64() + 8'000;
+
+    while (GetTickCount64() < deadline) {
+        if (!QueryServiceStatusEx(
+                hSvc,
+                SC_STATUS_PROCESS_INFO,
+                reinterpret_cast<LPBYTE>(&status),
+                sizeof(status),
+                &bytesNeeded)) {
+            const DWORD err = GetLastError();
+            LOG_WIN32_ERROR("QueryServiceStatusEx");
+            return ServiceResult::fromWin32(err, "start/status: " + serviceName);
+        }
+
+        if (status.dwCurrentState == SERVICE_RUNNING) {
+            spdlog::info("[Service] start | OK: {}", serviceName.toStdString());
+            return ServiceResult::success();
+        }
+
+        if (status.dwCurrentState == SERVICE_STOPPED) {
+            const DWORD err = status.dwWin32ExitCode != ERROR_SUCCESS
+                ? status.dwWin32ExitCode
+                : ERROR_SERVICE_NOT_ACTIVE;
+            return {
+                ServiceResult::Status::Failed,
+                err,
+                QStringLiteral("service stopped during startup: %1 "
+                               "(win32=%2, serviceSpecific=%3)")
+                    .arg(serviceName)
+                    .arg(status.dwWin32ExitCode)
+                    .arg(status.dwServiceSpecificExitCode)
+            };
+        }
+
+        const DWORD waitMs = std::clamp(status.dwWaitHint / 10, 100UL, 1'000UL);
+        Sleep(waitMs);
+    }
+
+    return {
+        ServiceResult::Status::Failed,
+        ERROR_SERVICE_REQUEST_TIMEOUT,
+        QStringLiteral("timed out waiting for service to start: %1").arg(serviceName)
+    };
 }
 
 ServiceResult Service::stop(const QString& serviceName)

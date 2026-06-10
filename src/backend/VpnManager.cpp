@@ -1,6 +1,7 @@
 ﻿#include "VpnManager.h"
 
 #include <QCoreApplication>
+#include <QFile>
 #include <QFileInfo>
 #include <QProcess>
 
@@ -37,6 +38,14 @@ CmdResult VpnManager::runServiceCommand(const QString& serviceExe,
     proc.setProcessChannelMode(QProcess::MergedChannels);
     proc.start();
 
+    if (!proc.waitForStarted(timeoutMs)) {
+        const QString msg = proc.errorString();
+        spdlog::error("[VPN] {} | failed to start helper: {}",
+                      context.toStdString(), msg.toStdString());
+        emit errorOccurred(context, msg);
+        return { EC::UnexpectedError, msg };
+    }
+
     if (!proc.waitForFinished(timeoutMs)) {
         proc.kill();
         const QString msg = "timed out after " + QString::number(timeoutMs) + "ms";
@@ -54,7 +63,13 @@ CmdResult VpnManager::runServiceCommand(const QString& serviceExe,
     spdlog::info("[VPN] {} | exit code: {}", context.toStdString(), static_cast<int>(code));
 
     if (!XyreExitCode::isSoftCode(code)) {
-        emit errorOccurred(context + QString::number(code), output);
+        const QString detail = output.isEmpty()
+            ? QStringLiteral("service helper failed with exit code %1")
+                  .arg(static_cast<int>(code))
+            : output;
+        emit errorOccurred(
+            context + QStringLiteral(" (exit code %1)").arg(static_cast<int>(code)),
+            detail);
     }
 
     return { code, output };
@@ -67,14 +82,31 @@ void VpnManager::connectVpn(const QString& endpoint, const QString& confPath) {
     spdlog::info("[VPN] connectVpn | config={} service={}",
                  confPath.toStdString(), serviceName.toStdString());
 
+    const QFileInfo confInfo(confPath);
+    if (!confInfo.exists() || !confInfo.isFile() || !confInfo.isReadable()) {
+        const QString detail =
+            QStringLiteral("WireGuard config does not exist or is not readable: %1")
+                .arg(confPath);
+        spdlog::error("[VPN] connectVpn | {}", detail.toStdString());
+        emit errorOccurred("validate config", detail);
+        return;
+    }
+
     const auto addResult = runServiceCommand(exe, { "add", confPath }, "add");
     if (!addResult.soft()) return;  // hard failure — errorOccurred already emitted
 
     if (addResult.code == EC::AlreadyExists)
         spdlog::info("[VPN] connectVpn | service already registered, skipping add");
 
-    const auto startResult = runServiceCommand(exe, { "start", serviceName }, "start");
-    if (!startResult.soft()) return;
+    const auto startResult =
+        runServiceCommand(exe, { "start", serviceName }, "start", 10'000);
+    if (!startResult.soft()) {
+      // Newly created services are removed when startup fails.
+        if (addResult.ok()) {
+            runServiceCommand(exe, { "uninstall", serviceName }, "cleanup");
+        }
+        return;
+    }
 
     if (startResult.code == EC::AlreadyRunning)
         spdlog::info("[VPN] connectVpn | tunnel was already running");

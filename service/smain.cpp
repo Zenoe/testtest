@@ -51,9 +51,14 @@ static void logResult(const ServiceResult& r, const std::string& ctx) {
     else if (r.soft())
         spdlog::warn("wmain | {} | soft: {} (win32={})",
                      ctx, r.detail.toStdString(), r.win32);
-    else
+    else {
         spdlog::error("wmain | {} | failed: {} (win32={})",
                       ctx, r.detail.toStdString(), r.win32);
+        // Helper failures are returned through stderr to the app.
+        std::wcerr << L"Failed at " << QString::fromStdString(ctx).toStdWString()
+                   << L": " << r.detail.toStdWString()
+                   << L" (win32=" << r.win32 << L")\n";
+    }
 }
 
 int wmain(int argc, wchar_t* argv[]) {
@@ -68,8 +73,14 @@ int wmain(int argc, wchar_t* argv[]) {
 		spdlog::info("wmain | command={}", to_utf8(cmd));
 		if (cmd == L"/service") {
 			spdlog::info("wmain | calling WireGuardTunnelService with config path {}", to_utf8(argv[2]));
-			Tunnel::Service::run(QString::fromStdWString(argv[2]));
-			return EC::Ok;
+			try {
+				Tunnel::Service::run(QString::fromStdWString(argv[2]));
+				return EC::Ok;
+			}
+			catch (const std::exception& ex) {
+				spdlog::error("wmain | WireGuardTunnelService failed: {}", ex.what());
+				return EC::ServiceStartFailed;
+			}
 		}
 
 		ServiceResult result;
