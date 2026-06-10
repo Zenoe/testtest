@@ -271,6 +271,51 @@ void NetworkManager::logout()
         });
 }
 
+void NetworkManager::editPassword(const QString& oldPassword, const QString& newPassword)
+{
+    static constexpr char kEndpoint[] = "/revelation/user/editPassword";
+
+    if (!SessionManager::instance().isLoggedIn()) {
+        emit passwordEditFinished(false, tr("请先登录后再修改密码"));
+        return;
+    }
+
+    const QJsonObject body{
+        { "oldPassword", oldPassword },
+        { "newPassword", newPassword },
+    };
+    const QByteArray payload = QJsonDocument(body).toJson(QJsonDocument::Compact);
+
+    spdlog::info("editPassword: sending request");
+    QNetworkReply* reply = m_nam->post(createRequest(kEndpoint), payload);
+    auto* timer = startTimeoutTimer(reply, "editPassword");
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, timer]() {
+        stopAndDelete(timer);
+
+        if (reply->error() == QNetworkReply::OperationCanceledError) {
+            spdlog::error("editPassword: aborted (timeout)");
+            emit passwordEditFinished(false, tr("修改密码请求超时"));
+            reply->deleteLater();
+            return;
+        }
+
+        QJsonObject obj;
+        QString error;
+        if (parseStandardReply(reply, obj, error) != ParseResult::Ok) {
+            spdlog::error("editPassword: failed: {}", error.toStdString());
+            emit passwordEditFinished(false, error);
+            reply->deleteLater();
+            return;
+        }
+
+        const QString message = obj.value("msg").toString(tr("修改密码成功"));
+        spdlog::info("editPassword: success");
+        emit passwordEditFinished(true, message);
+        reply->deleteLater();
+    });
+}
+
 void NetworkManager::fetchSandBoxConf() {
     spdlog::info("fetchSandBoxConf");
 }

@@ -4,7 +4,9 @@
 #include <QApplication>
 #include <QMenu>
 #include <QPainterPath>
+#include <QMessageBox>
 #include "SettingsDialog.h"
+#include "ChangePasswordDialog.h"
 #include "backend/SessionManager.h"
 #include <QFileInfo>
 #include "utils/logger.h"
@@ -43,6 +45,16 @@ AvatarWidget::AvatarWidget(QWidget* parent) : QWidget(parent)
         dlg->show();
         });
      m_menu->addAction("Vpn Status", this, &AvatarWidget::showVpnStatus);
+    m_menu->addAction(tr("修改密码"), this, [this]() {
+        if (!SessionManager::instance().isLoggedIn()) {
+            QMessageBox::information(this, tr("修改密码"), tr("请先登录后再修改密码"));
+            return;
+        }
+
+        auto* dialog = new ChangePasswordDialog(findMainWindow(this));
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
+    });
     //QAction* logoutAction = m_menu->addAction("Logout", this, &AvatarWidget::logoutRequested);
 	QAction* logoutAction = m_menu->addAction("Logout", this, [this]() { emit logoutRequested(); });
     m_menu->addSeparator();

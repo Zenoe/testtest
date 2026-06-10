@@ -27,6 +27,7 @@ public:
     void logout();          // optional server-side invalidation
     void fetchCaptcha();
     void fetchVpnConf();
+    void editPassword(const QString& oldPassword, const QString& newPassword);
     //void fetchCaptcha(const QString& url, std::function<void(bool success, const QString& imgBase64, const QString& uuid, QString errStr)> callback);
 
 	void get(const QUrl& url, std::function<void(QNetworkReply*)> callback);
@@ -50,6 +51,7 @@ signals:
                         bool captchaEnabled,
                         const QString& errorMsg);
     void vpnConfFetched(bool success, const VpnConfig& config, const QString& errorMsg);
+    void passwordEditFinished(bool success, const QString& message);
 private:
     explicit NetworkManager(QObject* parent = nullptr);
     ~NetworkManager() = default;

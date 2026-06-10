@@ -1,4 +1,4 @@
-﻿# Added CMAKE_CXX_STANDARD_REQUIRED ON and EXTENSIONS OFF — best practice to prevent silent fallback to a different standard.
+# Added CMAKE_CXX_STANDARD_REQUIRED ON and EXTENSIONS OFF — best practice to prevent silent fallback to a different standard.
 # Replaced set(PLATFORM_SOURCES ...) + separate if blocks with a single if/elseif using list(APPEND COMMON_SOURCES ...) — cleaner, no separate variable needed.
 # Sorted sources into logical groups (ui, backend, utils, models).
 # Added a single lib/bin copy with copy_directory — one command covers all DLLs in that folder, no need to enumerate them.
@@ -57,6 +57,7 @@ qt_add_executable(Revelation
     src/ui/pages/AppGridWidget.cpp
     src/ui/components/AppItemWidget.cpp
     src/ui/components/SettingsDialog.cpp
+    src/ui/components/ChangePasswordDialog.cpp
     src/ui/components/AvatarWidget.cpp
     src/ui/components/ClickableLabel.h
     src/ui/components/ClickableLabel.cpp
