@@ -116,10 +116,10 @@ ServiceResult Service::add(const QString& serviceName,
         };
     }
 
-    ScmHandle hSCM = openSCM(SC_MANAGER_ALL_ACCESS);
+    ScmHandle hSCM = openSCM(SC_MANAGER_CREATE_SERVICE);
     if (!hSCM) {
         const DWORD err = GetLastError();
-        LOG_WIN32_ERROR("SC_MANAGER_ALL_ACCESS");
+        LOG_WIN32_ERROR("SC_MANAGER_CREATE_SERVICE");
         return ServiceResult::fromWin32(err, "openSCM");
     }
     const QString cmdLine =
@@ -130,7 +130,7 @@ ServiceResult Service::add(const QString& serviceName,
         hSCM,
         reinterpret_cast<LPCWSTR>(serviceName.utf16()),
         reinterpret_cast<LPCWSTR>(displayName.utf16()),
-        SERVICE_ALL_ACCESS,
+        SERVICE_CHANGE_CONFIG | SERVICE_QUERY_STATUS | DELETE,
         SERVICE_WIN32_OWN_PROCESS,
         SERVICE_AUTO_START,
         SERVICE_ERROR_NORMAL,
@@ -150,6 +150,7 @@ ServiceResult Service::add(const QString& serviceName,
     if (!ChangeServiceConfig2W(hSvc, SERVICE_CONFIG_SERVICE_SID_INFO, &sidInfo)) {
         const DWORD err = GetLastError();
         LOG_WIN32_ERROR("ChangeServiceConfig2W");
+        DeleteService(hSvc);
         return ServiceResult::fromWin32(err, "add/SID: " + serviceName);
     }
 

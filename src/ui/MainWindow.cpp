@@ -23,6 +23,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setupUi();
     // setupTray();
     setupConnections();
+    VpnManager::instance().initializeControlService();
     determineInitialState();
 }
 

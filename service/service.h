@@ -75,7 +75,7 @@ namespace Tunnel {
             }
         };
 
-        static ScmHandle openSCM(DWORD access = SC_MANAGER_ALL_ACCESS);
+        static ScmHandle openSCM(DWORD access);
         static ScmHandle openService(SC_HANDLE hSCM, const QString& name, DWORD access);
     };
 

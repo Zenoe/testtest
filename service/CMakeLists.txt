@@ -18,6 +18,8 @@ add_executable(xyreService
     smain.cpp
     service.h
     service.cpp
+    ControllerService.h
+    ControllerService.cpp
     slogger.h
     slogger.cpp
     #tunnel/Driver.h
@@ -30,45 +32,14 @@ target_include_directories(xyreService PRIVATE
     ${CMAKE_SOURCE_DIR}/common
 )
 
-# # ── Admin elevation manifest (Windows only) ──────────────────────────────────
-# if(WIN32)
-# 	if(MSVC)
-# 		 target_link_options(xyreService PRIVATE /MANIFEST:NO)
-# 	 endif()
-
-#     # Embed the manifest so Windows UAC prompts for elevation on launch.
-#     # The mt.exe approach works with both MSVC and MinGW toolchains via CMake.
-#     target_sources(xyreService PRIVATE
-#         "${CMAKE_CURRENT_SOURCE_DIR}/xyreService.manifest"
-#     )
-#     set_source_files_properties(
-#         "${CMAKE_CURRENT_SOURCE_DIR}/xyreService.manifest"
-#         PROPERTIES VS_TOOL_OVERRIDE "Manifest"   # MSVC: picked up by the linker automatically
-#     )
-
-#     # For MinGW / non-MSVC: embed via a resource file that references the manifest
-#     if(NOT MSVC)
-#         configure_file(
-#             "${CMAKE_CURRENT_SOURCE_DIR}/xyreService.manifest"
-#             "${CMAKE_CURRENT_BINARY_DIR}/xyreService.manifest"
-#             COPYONLY
-#         )
-#         # Write a minimal .rc that embeds the manifest (resource ID 1, type RT_MANIFEST=24)
-#         file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/xyreService_manifest.rc"
-#             "#include <windows.h>\n"
-#             "1 RT_MANIFEST \"${CMAKE_CURRENT_BINARY_DIR}/xyreService.manifest\"\n"
-#         )
-#         target_sources(xyreService PRIVATE
-#             "${CMAKE_CURRENT_BINARY_DIR}/xyreService_manifest.rc"
-#         )
-#     endif()
-# endif()
-
 target_link_libraries(xyreService PRIVATE
     Qt6::Core
     advapi32
     spdlog::spdlog
 )
+if(MSVC)
+    target_link_options(xyreService PRIVATE "/MANIFESTUAC:level='asInvoker'")
+endif()
 
 # Output all configurations next to Revelation (i.e. the root binary dir)
 set_target_properties(xyreService PROPERTIES

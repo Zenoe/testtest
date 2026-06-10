@@ -63,6 +63,8 @@ qt_add_executable(Revelation
     src/backend/NetworkManager.cpp
     src/backend/SessionManager.cpp
     src/backend/AppLauncher.cpp
+    src/backend/ControlServiceClient.cpp
+    src/backend/ControlServiceClient.h
     src/backend/VpnManager.cpp
     src/backend/SpaManager.cpp
     src/utils/logger.h
@@ -102,11 +104,17 @@ target_link_libraries(Revelation PRIVATE
     spdlog::spdlog
     OpenSSL::SSL
     OpenSSL::Crypto
+    advapi32
+    ole32
+    shell32
 )
 
 set_target_properties(Revelation PROPERTIES
     WIN32_EXECUTABLE TRUE   # No console window on Windows
 )
+if(MSVC)
+    target_link_options(Revelation PRIVATE "/MANIFESTUAC:level='asInvoker'")
+endif()
 
 # ── Post-build: copy DLLs (Windows only) ────────────────────────────────────
 if(WIN32)
