@@ -2,6 +2,7 @@
 
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 
 struct ControlResponse {
     bool ok = false;
@@ -20,12 +21,19 @@ struct TrafficStatsResponse {
     QString detail;
 };
 
+struct RingLogResponse {
+    bool ok = false;
+    QStringList lines;
+    QString detail;
+};
+
 class ControlServiceClient {
 public:
     static bool isControllerInstalled();
     static ControlResponse ensureAvailable(const QString& serviceExePath);
     static ControlResponse send(const QJsonObject& request, int timeoutMs = 10'000);
     static TrafficStatsResponse queryTraffic(const QString& adapterName, int timeoutMs = 2'000);
+    static RingLogResponse queryRingLog(const QString& configPath, int timeoutMs = 5'000);
 
 private:
     static ControlResponse installElevated(const QString& serviceExePath);

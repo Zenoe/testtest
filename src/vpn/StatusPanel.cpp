@@ -1,5 +1,6 @@
 #include "StatusPanel.h"
 #include "backend/ControlServiceClient.h"
+#include "RingLogDialog.h"
 
 #include <QApplication>
 #include <QGraphicsDropShadowEffect>
@@ -104,17 +105,35 @@ QPushButton#closeBtn:hover {
 QPushButton#closeBtn:pressed {
     background: #E3E8F0;
 }
+QPushButton#logButton {
+    min-width: 0;
+    min-height: 32px;
+    max-height: 32px;
+    color: #2468F2;
+    background: #F0F5FF;
+    border: 1px solid #C9D9FA;
+    border-radius: 8px;
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 600;
+}
+QPushButton#logButton:hover {
+    color: #1848B8;
+    background: #E4EDFF;
+    border-color: #9CB9F5;
+}
 )";
-StatusPanel::StatusPanel(const QString& adapterName, QWidget* parent)
+StatusPanel::StatusPanel(const QString& adapterName, const QString& configPath, QWidget* parent)
     : QWidget(parent, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint)
     , m_adapterName(adapterName)
+    , m_configPath(configPath)
 {
     setObjectName("statusPanelRoot");
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose, false);
     setStyleSheet(kStyle);
     buildUi();
-    setFixedSize(360, 270);
+    setFixedSize(360, 315);
 }
 
 StatusPanel::~StatusPanel()
@@ -227,6 +246,19 @@ void StatusPanel::buildUi()
         row->addStretch();
         row->addWidget(m_statusLabel, 0, Qt::AlignTop);
         row->addWidget(closeBtn);
+        root->addLayout(row);
+    }
+
+    {
+        auto* row = new QHBoxLayout;
+        auto* hint = new QLabel("Controller and tunnel diagnostics", container);
+        hint->setObjectName("subtitle");
+        auto* logButton = new QPushButton("View diagnostic log", container);
+        logButton->setObjectName("logButton");
+        connect(logButton, &QPushButton::clicked, this, &StatusPanel::showRingLog);
+        row->addWidget(hint);
+        row->addStretch();
+        row->addWidget(logButton);
         root->addLayout(row);
     }
 
@@ -378,6 +410,17 @@ void StatusPanel::onError(const QString& msg)
     m_handshakeValue->setText("Unavailable");
     m_handshakeValue->setToolTip(msg);
     setConnectionState("Unavailable", "offline");
+}
+
+void StatusPanel::showRingLog()
+{
+    if (!m_ringLogDialog) {
+        QWidget* owner = parentWidget() ? parentWidget() : this;
+        m_ringLogDialog = new RingLogDialog(m_configPath, owner);
+    }
+    m_ringLogDialog->show();
+    m_ringLogDialog->raise();
+    m_ringLogDialog->activateWindow();
 }
 
 // ---- formatBytes ------------------------------------------------------------

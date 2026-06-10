@@ -5,6 +5,7 @@
 
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QThread>
 
@@ -362,4 +363,26 @@ TrafficStatsResponse ControlServiceClient::queryTraffic(const QString& adapterNa
         };
     }
     return { true, rx, tx, lastHandshake, {} };
+}
+
+RingLogResponse ControlServiceClient::queryRingLog(const QString& configPath, int timeoutMs) {
+    const ControlResponse response = send(QJsonObject{
+        { QStringLiteral("command"), QStringLiteral("ringlog") },
+        { QStringLiteral("configPath"), QFileInfo(configPath).absoluteFilePath() }
+    }, timeoutMs);
+    if (!response.ok)
+        return { false, {}, response.detail };
+
+    QStringList lines;
+    const QJsonValue linesValue = response.payload.value("lines");
+    if (!linesValue.isArray())
+        return { false, {}, QStringLiteral("controller returned invalid ring log data") };
+
+    const QJsonArray array = linesValue.toArray();
+    lines.reserve(array.size());
+    for (const QJsonValue& value : array) {
+        if (value.isString())
+            lines.append(value.toString());
+    }
+    return { true, lines, {} };
 }

@@ -1,4 +1,5 @@
 #include "Driver.h"
+#include "RingLogStore.h"
 #include "ControllerService.h"
 #include "service.h"
 #include "slogger.h"
@@ -8,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 
@@ -15,6 +17,7 @@
 #include <sddl.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <iterator>
 #include <limits>
 #include <stdexcept>
@@ -185,6 +188,35 @@ QByteArray trafficResponse(const QString& adapterName) {
     }
 }
 
+QByteArray ringLogResponse(const QString& configPath) {
+    const QFileInfo config(configPath);
+    if (configPath.isEmpty() || !config.isAbsolute())
+        return errorResponse(QStringLiteral("invalid config path for ring log"));
+
+    try {
+        QJsonArray lines;
+        for (const std::string& line :
+             Tunnel::readRingLog(std::filesystem::path(config.absoluteFilePath().toStdWString()),
+                                 100, 48 * 1024)) {
+            lines.append(QString::fromUtf8(line.data(), static_cast<qsizetype>(line.size())));
+        }
+
+        return QJsonDocument(QJsonObject{
+            { "ok", true },
+            { "code", XyreExitCode::Ok },
+            { "win32", 0 },
+            { "detail", QString{} },
+            { "lines", lines },
+            { "version", XyreControl::kProtocolVersion }
+        }).toJson(QJsonDocument::Compact);
+    }
+    catch (const std::exception& ex) {
+        return errorResponse(
+            QStringLiteral("failed to read ring log: %1").arg(QString::fromUtf8(ex.what())),
+            XyreExitCode::UnexpectedError);
+    }
+}
+
 QByteArray dispatch(const QByteArray& bytes) {
     QJsonParseError parseError{};
     const QJsonDocument document = QJsonDocument::fromJson(bytes, &parseError);
@@ -198,12 +230,16 @@ QByteArray dispatch(const QByteArray& bytes) {
     }
 
     const QString command = request.value("command").toString();
-    if (command == QStringLiteral("traffic") || command == QStringLiteral("ping"))
+    if (command == QStringLiteral("traffic") || command == QStringLiteral("ping")
+        || command == QStringLiteral("ringlog"))
         spdlog::trace("[Controller] request | command={}", command.toStdString());
     else
         spdlog::info("[Controller] request | command={}", command.toStdString());
     if (command == QStringLiteral("ping"))
         return responseFor(ServiceResult::success(), true);
+
+    if (command == QStringLiteral("ringlog"))
+        return ringLogResponse(request.value("configPath").toString());
 
     if (command == QStringLiteral("traffic")) {
         const QString adapterName = request.value("adapterName").toString();

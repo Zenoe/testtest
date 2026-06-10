@@ -56,7 +56,10 @@ private:
     //name = generateRandomString(16) + ".conf";
     //settings.setValue("confFileName", name);
     //}
-    return  "C:/Users/2004l/Downloads/clientxt.conf";
+
+    // for testing purpos, get conf from local conf file, need to modify MainWindow::onLoginSuccess
+    // return  "C:/Users/2004l/Downloads/client102.conf";
+    // MainWindow::onLoginSuccess(const QString& token) {
 
     QString name = "XY" + generateRandomString(16) + ".conf";
     /* name = "XY123.conf"; */

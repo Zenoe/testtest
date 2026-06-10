@@ -1,4 +1,4 @@
-﻿// ui/MainWindow.cpp
+// ui/MainWindow.cpp
 #include "MainWindow.h"
 #include "utils/ConfigManager.h"
 #include "backend/NetworkManager.h"
@@ -157,8 +157,8 @@ void MainWindow::onLoginSuccess(const QString& token) {
 	m_login->showMsg("登录成功，正在连接VPN...");
     NetworkManager::instance().fetchVpnConf();
 
-    //const QString confPath = SessionManager::instance().vpnConfPath();
-    // VpnManager::instance().connectVpn(confPath);
+    // const QString confPath = SessionManager::instance().vpnConfPath();
+    // VpnManager::instance().connectVpn("192.168.1.102",confPath);
     // switchToPage(2);
     // NetworkManager::instance().fetchAppList(token);
 }

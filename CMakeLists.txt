@@ -82,6 +82,8 @@ qt_add_executable(Revelation
     src/models/VpnConf.cpp
     src/vpn/StatusPanel.h
     src/vpn/StatusPanel.cpp
+    src/vpn/RingLogDialog.h
+    src/vpn/RingLogDialog.cpp
 
 
     src/test/test.cpp

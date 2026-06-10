@@ -23,6 +23,10 @@ add_executable(xyreService
     tunnel/Driver.h
     tunnel/Driver.cpp
     tunnel/WireGuardTypes.h
+    tunnel/RingLogger.h
+    tunnel/RingLogger.cpp
+    tunnel/RingLogStore.h
+    tunnel/RingLogStore.cpp
     # PipeServer.cpp
     # CommandDispatcher.cpp
 )

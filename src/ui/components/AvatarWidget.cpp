@@ -67,7 +67,7 @@ void AvatarWidget::showVpnStatus() {
             return;
         }
 
-        m_statusPanel = new StatusPanel(QFileInfo(confPath).baseName(), mainWin);
+        m_statusPanel = new StatusPanel(QFileInfo(confPath).baseName(), confPath, mainWin);
 
         // If MainWindow is ever destroyed, null our pointer so we don't dangle.
         connect(mainWin, &QObject::destroyed,

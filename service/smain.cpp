@@ -1,6 +1,7 @@
 #include "service.h"
 #include "ControllerService.h"
 #include "slogger.h"
+#include "tunnel/RingLogStore.h"
 
 #include <shlobj.h>
 #include <iostream>
@@ -78,12 +79,17 @@ int wmain(int argc, wchar_t* argv[]) {
 		spdlog::info("wmain | command={}", to_utf8(cmd));
 		if (cmd == L"/service") {
 			spdlog::info("wmain | calling WireGuardTunnelService with config path {}", to_utf8(argv[2]));
+			const std::filesystem::path configPath(argv[2]);
+			Tunnel::writeRingLog(configPath, "tunnel", "starting " + to_utf8(argv[2]));
 			try {
 				Tunnel::Service::run(QString::fromStdWString(argv[2]));
+				Tunnel::writeRingLog(configPath, "tunnel", "stopped " + to_utf8(argv[2]));
 				return EC::Ok;
 			}
 			catch (const std::exception& ex) {
 				spdlog::error("wmain | WireGuardTunnelService failed: {}", ex.what());
+				Tunnel::writeRingLog(
+					configPath, "tunnel", "failure " + to_utf8(argv[2]) + ": " + ex.what());
 				return EC::ServiceStartFailed;
 			}
 		}
