@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <QObject>
+#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include "models/ServerConfig.h"
 #include "models/AppEntry.h"
@@ -28,6 +29,8 @@ public:
     void fetchCaptcha();
     void fetchVpnConf();
     void editPassword(const QString& oldPassword, const QString& newPassword);
+    void checkTerminalRegistration(const QJsonObject& terminalInfo);
+    void registerTerminal(const QString& hardwareCode, const QString& code);
     //void fetchCaptcha(const QString& url, std::function<void(bool success, const QString& imgBase64, const QString& uuid, QString errStr)> callback);
 
 	void get(const QUrl& url, std::function<void(QNetworkReply*)> callback);
@@ -52,6 +55,8 @@ signals:
                         const QString& errorMsg);
     void vpnConfFetched(bool success, const VpnConfig& config, const QString& errorMsg);
     void passwordEditFinished(bool success, const QString& message);
+    void terminalRegistrationChecked(bool success, bool registered, const QString& errorMsg);
+    void terminalRegistered(bool success, const QString& uninstallCode, const QString& errorMsg);
 private:
     explicit NetworkManager(QObject* parent = nullptr);
     ~NetworkManager() = default;

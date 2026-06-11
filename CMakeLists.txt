@@ -58,6 +58,7 @@ qt_add_executable(Revelation
     src/ui/components/AppItemWidget.cpp
     src/ui/components/SettingsDialog.cpp
     src/ui/components/ChangePasswordDialog.cpp
+    src/ui/components/TerminalRegistrationDialog.cpp
     src/ui/components/AvatarWidget.cpp
     src/ui/components/ClickableLabel.h
     src/ui/components/ClickableLabel.cpp
@@ -79,6 +80,7 @@ qt_add_executable(Revelation
     
     src/utils/stringutil.h
     src/utils/RouteConflictChecker.cpp
+    src/system/TerminalInfoProvider.cpp
     src/models/UserSession.h
     src/models/VpnConf.cpp
     src/vpn/driver.h

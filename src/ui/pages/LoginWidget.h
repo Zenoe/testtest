@@ -5,8 +5,11 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QProgressBar>
+#include <QPointer>
 
 #include "ui/components/ClickableLabel.h"
+class TerminalRegistrationDialog;
+
 class LoginWidget : public QWidget {
     Q_OBJECT
 
@@ -46,10 +49,15 @@ private slots:
     void stopCaptchaLoading();
     void updateLoadingDots();
     void onLoginFinished(bool success, const QString& token, const QString& errorMsg);
+    void onTerminalRegistrationChecked(bool success, bool registered, const QString& errorMsg);
+    void onTerminalRegistered(bool success, const QString& uninstallCode, const QString& errorMsg);
 
 private:
     void setupUi();
     void setupConnections();
+    void showTerminalRegistrationDialog();
+    void completePostLogin();
+    void abortPostLogin(const QString& message);
 
     QWidget* m_formPanel = nullptr;
     /* void setCentralBackground(); */
@@ -77,5 +85,11 @@ private:
 	bool    m_preserveMessageOnCaptchaRefresh = false;
 	QTimer* m_loadingTimer = nullptr;
 	int     m_dotsCount = 0;
+    QString m_pendingToken;
+    QString m_pendingUsername;
+    QString m_terminalHardwareCode;
+    bool m_pendingRememberMe = false;
+    bool m_postLoginPending = false;
+    QPointer<TerminalRegistrationDialog> m_registrationDialog;
 	//QString getServerHost() ;
 };

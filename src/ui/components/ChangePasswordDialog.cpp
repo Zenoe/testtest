@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QStyle>
 #include <QVBoxLayout>
 #include <QStyle>
 #include "backend/NetworkManager.h"

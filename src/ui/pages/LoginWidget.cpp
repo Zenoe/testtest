@@ -7,6 +7,9 @@
 #include "utils/ConfigManager.h"
 #include "backend/SessionManager.h"
 #include "secure/SecureStorageFactory.h"
+#include "system/TerminalInfoProvider.h"
+#include "ui/components/TerminalRegistrationDialog.h"
+#include "utils/logger.h"
 
 LoginWidget::LoginWidget(QWidget* parent)
     : QWidget(parent)
@@ -235,6 +238,10 @@ void LoginWidget::setupConnections() {
 	// 接收 NetworkManager 的验证码结果
 	connect(&NetworkManager::instance(), &NetworkManager::captchaFetched, this, &LoginWidget::onCaptchaFetched);
     connect(&NetworkManager::instance(), &NetworkManager::loginFinished, this, &LoginWidget::onLoginFinished);
+    connect(&NetworkManager::instance(), &NetworkManager::terminalRegistrationChecked,
+        this, &LoginWidget::onTerminalRegistrationChecked);
+    connect(&NetworkManager::instance(), &NetworkManager::terminalRegistered,
+        this, &LoginWidget::onTerminalRegistered);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -312,32 +319,153 @@ void LoginWidget::onLoginFinished(bool success, const QString& token, const QStr
         return;
     }
 
-    // 登录成功
+    m_pendingToken = token;
+    m_pendingUsername = m_userEdit->text().trimmed();
+    m_pendingRememberMe = m_rememberMe->isChecked();
+    m_postLoginPending = true;
     m_preserveMessageOnCaptchaRefresh = false;
-    showMsg("登录成功");
 
-    // TODO
-    qDebug() << "Login success, token =" << token;
+    // Establish a non-persistent session so authenticated post-login checks can
+    // attach the bearer token. Persistence only happens after registration.
+    SessionManager::instance().setSession({ m_pendingUsername, token, false });
 
-	auto storage = SecureStorageFactory::create();
-	QString err;
+    showMsg(tr("登录成功，正在检查终端注册状态..."));
+    const TerminalInfoSnapshot terminalInfo = TerminalInfoProvider::collect();
+    m_terminalHardwareCode = terminalInfo.hardwareCode;
+    if (m_terminalHardwareCode.isEmpty()) {
+        abortPostLogin(tr("无法获取终端硬件特征码"));
+        return;
+    }
 
-	if (m_rememberMe->isChecked()) {
-		storage->save(qApp->applicationDisplayName(), m_userEdit->text().trimmed(), token, err);
-	}
-	else {
-		storage->remove(qApp->applicationDisplayName(), err);
-	}
+    NetworkManager::instance().checkTerminalRegistration(terminalInfo.payload);
+}
 
-	if (!err.isEmpty()) {
-		qWarning() << err;
-	}
-    // 替换原有的 setSession 调用，显式构造 UserSession 对象
+void LoginWidget::onTerminalRegistrationChecked(bool success,
+                                                bool registered,
+                                                const QString& errorMsg)
+{
+    if (!m_postLoginPending)
+        return;
+
+    if (!success) {
+        abortPostLogin(errorMsg.isEmpty() ? tr("终端注册状态检查失败") : errorMsg);
+        return;
+    }
+
+    if (registered) {
+        spdlog::info("LoginWidget: terminal already registered, continuing login");
+        completePostLogin();
+        return;
+    }
+
+    spdlog::info("LoginWidget: terminal registration required");
+    showMsg(tr("终端尚未注册，请输入注册验证码"));
+    showTerminalRegistrationDialog();
+}
+
+void LoginWidget::onTerminalRegistered(bool success,
+                                       const QString& uninstallCode,
+                                       const QString& errorMsg)
+{
+    if (!m_postLoginPending)
+        return;
+
+    if (!success) {
+        if (m_registrationDialog) {
+            m_registrationDialog->setSubmitting(false);
+            m_registrationDialog->showError(
+                errorMsg.isEmpty() ? tr("终端注册失败") : errorMsg);
+        } else {
+            abortPostLogin(errorMsg.isEmpty() ? tr("终端注册失败") : errorMsg);
+        }
+        return;
+    }
+
+    auto storage = SecureStorageFactory::create();
+    QString storageError;
+    const QString uninstallCodeKey =
+        qApp->applicationDisplayName() + QStringLiteral("/terminal-uninstall-code");
+    if (!storage->save(uninstallCodeKey, m_pendingUsername, uninstallCode, storageError)) {
+        spdlog::error("LoginWidget: failed to securely store terminal uninstall code: {}",
+            storageError.toStdString());
+    }
+
+    if (m_registrationDialog)
+        m_registrationDialog->accept();
+
+    showMsg(tr("终端注册成功，正在继续登录..."));
+    completePostLogin();
+}
+
+void LoginWidget::showTerminalRegistrationDialog()
+{
+    if (m_registrationDialog) {
+        m_registrationDialog->raise();
+        m_registrationDialog->activateWindow();
+        return;
+    }
+
+    m_registrationDialog = new TerminalRegistrationDialog(window());
+    m_registrationDialog->setAttribute(Qt::WA_DeleteOnClose);
+
+    connect(m_registrationDialog, &TerminalRegistrationDialog::registrationRequested,
+        this, [this](const QString& code) {
+            if (!m_postLoginPending)
+                return;
+            NetworkManager::instance().registerTerminal(m_terminalHardwareCode, code);
+        });
+
+    connect(m_registrationDialog, &QDialog::rejected, this, [this]() {
+        if (m_postLoginPending)
+            abortPostLogin(tr("终端未注册，登录已取消"));
+    });
+
+    m_registrationDialog->show();
+}
+
+void LoginWidget::completePostLogin()
+{
+    if (!m_postLoginPending)
+        return;
+
+    auto storage = SecureStorageFactory::create();
+    QString error;
+    if (m_pendingRememberMe) {
+        storage->save(qApp->applicationDisplayName(), m_pendingUsername, m_pendingToken, error);
+    } else {
+        storage->remove(qApp->applicationDisplayName(), error);
+    }
+    if (!error.isEmpty()) {
+        spdlog::warn("LoginWidget: credential persistence operation reported: {}",
+            error.toStdString());
+    }
+
     SessionManager::instance().setSession(
-        {m_userEdit->text().trimmed(), token, m_rememberMe->isChecked()}
-    );
+        { m_pendingUsername, m_pendingToken, m_pendingRememberMe });
 
-	emit loginSuccess(token);
+    const QString token = m_pendingToken;
+    m_postLoginPending = false;
+    m_pendingToken.clear();
+    m_pendingUsername.clear();
+    m_terminalHardwareCode.clear();
+
+    emit loginSuccess(token);
+}
+
+void LoginWidget::abortPostLogin(const QString& message)
+{
+    spdlog::error("LoginWidget: post-login terminal validation failed: {}",
+        message.toStdString());
+
+    m_postLoginPending = false;
+    m_pendingToken.clear();
+    m_pendingUsername.clear();
+    m_terminalHardwareCode.clear();
+    SessionManager::instance().clearSession();
+
+    m_preserveMessageOnCaptchaRefresh = true;
+    showMsg(message, true);
+    refreshCaptcha();
 }
 
 void LoginWidget::onFieldsChanged() {

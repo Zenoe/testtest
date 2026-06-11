@@ -124,40 +124,41 @@ ParseResult NetworkManager::parseStandardReply(QNetworkReply* reply,
     QJsonObject& outObj,
     QString& errorMsg)
 {
-    // ── 1. Network-level error ────────────────
-    if (reply->error() != QNetworkReply::NoError) {
+    const QByteArray  raw = reply->readAll();
+    const QJsonDocument doc = QJsonDocument::fromJson(raw);
+    const QJsonObject obj = doc.isObject() ? doc.object() : QJsonObject{};
+    const int httpStatus = reply->attribute(
+        QNetworkRequest::HttpStatusCodeAttribute).toInt();
+
+    // HTTP 4xx/5xx responses may set QNetworkReply::error() even though the
+    // server returned a valid application JSON body. Preserve its msg field.
+    if (reply->error() != QNetworkReply::NoError && obj.isEmpty()) {
         errorMsg = reply->errorString();
-        spdlog::warn("parseStandardReply: network error [{}] {}",
-            static_cast<int>(reply->error()),
-            errorMsg.toStdString());
+        spdlog::warn("parseStandardReply: transport error [{}] http={} {}",
+            static_cast<int>(reply->error()), httpStatus, errorMsg.toStdString());
         return ParseResult::NetworkError;
     }
 
-    // ── 2. Parse body ─────────────────────────
-    const QByteArray  raw = reply->readAll();
-    const QJsonDocument doc = QJsonDocument::fromJson(raw);
-
-    if (!doc.isObject()) {
+    if (obj.isEmpty()) {
         errorMsg = "返回数据格式错误";
         spdlog::error("parseStandardReply: malformed JSON body: {}",
             QString(raw).left(256).toStdString());
         return ParseResult::ServerError;
     }
 
-    const QJsonObject obj = doc.object();
     const int         code = obj.value("code").toInt(-1);
 
-    // ── 3. Application-level error ────────────
     if (code != kHttpOk) {
         errorMsg = obj.value("msg").toString("请求失败");
-        spdlog::warn("parseStandardReply: server code={} msg={}",
-            code, errorMsg.toStdString());
+        spdlog::warn("parseStandardReply: server code={} http={} msg={}",
+            code, httpStatus, errorMsg.toStdString());
 
         if (code == kHttpUnauthorized) {
             spdlog::info("parseStandardReply: 401 – triggering session teardown");
             handleUnauthorized();
+            return ParseResult::Unauthorized;
         }
-        return ParseResult::Unauthorized;
+        return ParseResult::ServerError;
     }
 
     spdlog::debug("parseStandardReply: success (code={})", code);
@@ -316,6 +317,116 @@ void NetworkManager::editPassword(const QString& oldPassword, const QString& new
     });
 }
 
+void NetworkManager::checkTerminalRegistration(const QJsonObject& terminalInfo)
+{
+    const QString endpoint = QString::fromStdString(
+        ConfigManager::instance()
+            .get<std::string>("server.terminal_check_endpoint")
+            .value_or("/terminal/info/check"));
+
+    if (!SessionManager::instance().isLoggedIn()) {
+        emit terminalRegistrationChecked(false, false, tr("终端检查需要先登录"));
+        return;
+    }
+
+    spdlog::info("checkTerminalRegistration: sending request endpoint='{}'",
+        endpoint.toStdString());
+    const QByteArray payload = QJsonDocument(terminalInfo).toJson(QJsonDocument::Compact);
+    QNetworkReply* reply = m_nam->post(createRequest(endpoint), payload);
+    auto* timer = startTimeoutTimer(reply, "checkTerminalRegistration");
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, timer]() {
+        stopAndDelete(timer);
+
+        if (reply->error() == QNetworkReply::OperationCanceledError) {
+            spdlog::error("checkTerminalRegistration: aborted (timeout)");
+            emit terminalRegistrationChecked(false, false, tr("终端注册状态检查超时"));
+            reply->deleteLater();
+            return;
+        }
+
+        QJsonObject obj;
+        QString error;
+        if (parseStandardReply(reply, obj, error) != ParseResult::Ok) {
+            spdlog::error("checkTerminalRegistration: failed: {}", error.toStdString());
+            emit terminalRegistrationChecked(false, false, error);
+            reply->deleteLater();
+            return;
+        }
+
+        if (!obj.contains("register") || !obj.value("register").isBool()) {
+            spdlog::error("checkTerminalRegistration: success response missing boolean register");
+            emit terminalRegistrationChecked(false, false, tr("终端检查返回数据不完整"));
+            reply->deleteLater();
+            return;
+        }
+
+        const bool registered = obj.value("register").toBool();
+        spdlog::info("checkTerminalRegistration: completed registered={}", registered);
+        emit terminalRegistrationChecked(true, registered, {});
+        reply->deleteLater();
+    });
+}
+
+void NetworkManager::registerTerminal(const QString& hardwareCode, const QString& code)
+{
+    const QString endpoint = QString::fromStdString(
+        ConfigManager::instance()
+            .get<std::string>("server.terminal_register_endpoint")
+            .value_or("/revelation/terminal/info/register"));
+
+    if (!SessionManager::instance().isLoggedIn()) {
+        emit terminalRegistered(false, {}, tr("终端注册需要先登录"));
+        return;
+    }
+    if (hardwareCode.isEmpty() || code.isEmpty()) {
+        emit terminalRegistered(false, {}, tr("终端硬件特征码或注册验证码为空"));
+        return;
+    }
+
+    const QJsonObject body{
+        { "hardwareCode", hardwareCode },
+        { "code", code },
+    };
+
+    spdlog::info("registerTerminal: sending request endpoint='{}'", endpoint.toStdString());
+    const QByteArray payload = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    QNetworkReply* reply = m_nam->post(createRequest(endpoint), payload);
+    auto* timer = startTimeoutTimer(reply, "registerTerminal");
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, timer]() {
+        stopAndDelete(timer);
+
+        if (reply->error() == QNetworkReply::OperationCanceledError) {
+            spdlog::error("registerTerminal: aborted (timeout)");
+            emit terminalRegistered(false, {}, tr("终端注册请求超时"));
+            reply->deleteLater();
+            return;
+        }
+
+        QJsonObject obj;
+        QString error;
+        if (parseStandardReply(reply, obj, error) != ParseResult::Ok) {
+            spdlog::error("registerTerminal: failed: {}", error.toStdString());
+            emit terminalRegistered(false, {}, error);
+            reply->deleteLater();
+            return;
+        }
+
+        const QString uninstallCode = obj.value("uninstallCode").toString();
+        if (uninstallCode.isEmpty()) {
+            spdlog::error("registerTerminal: success response missing uninstallCode");
+            emit terminalRegistered(false, {}, tr("注册成功但服务器未返回卸载码"));
+            reply->deleteLater();
+            return;
+        }
+
+        spdlog::info("registerTerminal: success");
+        emit terminalRegistered(true, uninstallCode, {});
+        reply->deleteLater();
+    });
+}
+
 void NetworkManager::fetchSandBoxConf() {
     spdlog::info("fetchSandBoxConf");
 }
@@ -458,9 +569,10 @@ void NetworkManager::fetchVpnConf()
 
             QJsonObject obj;
             QString     err;
-            if (parseStandardReply(reply, obj, err) == ParseResult::Unauthorized) {
-                //spdlog::error("fetchVpnConf: {}", err.toStdString());
-                //emit vpnConfFetched(false, {}, err);
+            const ParseResult result = parseStandardReply(reply, obj, err);
+            if (result != ParseResult::Ok) {
+                if (result != ParseResult::Unauthorized)
+                    emit vpnConfFetched(false, {}, err);
                 reply->deleteLater();
                 return;
             }
