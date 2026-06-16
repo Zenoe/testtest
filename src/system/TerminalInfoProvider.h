@@ -5,8 +5,9 @@
 #include <QString>
 
 struct TerminalInfoSnapshot {
-    QString hardwareCode;
     QJsonObject payload;
+
+    QString hardwareCode() const;
 };
 
 class TerminalInfoProvider {

@@ -331,7 +331,7 @@ void LoginWidget::onLoginFinished(bool success, const QString& token, const QStr
 
     showMsg(tr("登录成功，正在检查终端注册状态..."));
     const TerminalInfoSnapshot terminalInfo = TerminalInfoProvider::collect();
-    m_terminalHardwareCode = terminalInfo.hardwareCode;
+    m_terminalHardwareCode = terminalInfo.hardwareCode();
     if (m_terminalHardwareCode.isEmpty()) {
         abortPostLogin(tr("无法获取终端硬件特征码"));
         return;

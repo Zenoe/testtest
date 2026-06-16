@@ -9,11 +9,24 @@
 #include <QSettings>
 #include <QStorageInfo>
 #include <QSysInfo>
+#include <QStringList>
 #include <QtMath>
+#include <limits>
+#include <optional>
 
 #ifdef Q_OS_WIN
-#define NOMINMAX
-#include <windows.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#  define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#  define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
+#include <ws2ipdef.h>
+#pragma comment(lib, "iphlpapi.lib")
+#pragma comment(lib, "ws2_32.lib")
 #endif
 
 #include "utils/logger.h"
@@ -53,6 +66,81 @@ bool isActiveInterface(const QNetworkInterface& networkInterface)
         && (networkInterface.flags() & QNetworkInterface::IsRunning);
 }
 
+bool isVirtualOrTunnelInterface(const QNetworkInterface& networkInterface)
+{
+    const QString identity = QStringLiteral("%1 %2")
+        .arg(networkInterface.name(), networkInterface.humanReadableName())
+        .toLower();
+
+    static const QStringList markers{
+        "virtualbox",
+        "virtual",
+        "host-only",
+        "vmware",
+        "hyper-v",
+        "vethernet",
+        "docker",
+        "wsl",
+        "npcap",
+        "loopback",
+        "wireguard",
+        "wintun",
+        "tap",
+        "tun",
+        "tailscale",
+        "zerotier",
+        "bluetooth",
+        "pseudo",
+        "isatap",
+        "teredo",
+    };
+
+    for (const auto& marker : markers) {
+        if (identity.contains(marker))
+            return true;
+    }
+    return false;
+}
+
+std::optional<quint32> defaultRouteInterfaceIndex()
+{
+#ifdef Q_OS_WIN
+    MIB_IPFORWARD_TABLE2* rawTable = nullptr;
+    const DWORD rc = GetIpForwardTable2(AF_INET, &rawTable);
+    if (rc != NO_ERROR) {
+        spdlog::warn("TerminalInfoProvider: GetIpForwardTable2(AF_INET) failed, error={}", rc);
+        return std::nullopt;
+    }
+
+    struct TableGuard {
+        MIB_IPFORWARD_TABLE2* table = nullptr;
+        ~TableGuard() { if (table) FreeMibTable(table); }
+    } guard{ rawTable };
+
+    quint32 bestIndex = 0;
+    ULONG bestMetric = std::numeric_limits<ULONG>::max();
+    for (ULONG i = 0; i < rawTable->NumEntries; ++i) {
+        const MIB_IPFORWARD_ROW2& row = rawTable->Table[i];
+        if (row.DestinationPrefix.Prefix.si_family != AF_INET
+            || row.DestinationPrefix.PrefixLength != 0
+            || row.InterfaceIndex == 0) {
+            continue;
+        }
+
+        if (row.Metric < bestMetric) {
+            bestMetric = row.Metric;
+            bestIndex = row.InterfaceIndex;
+        }
+    }
+
+    if (bestIndex == 0)
+        return std::nullopt;
+    return bestIndex;
+#else
+    return std::nullopt;
+#endif
+}
+
 QString firstAddress(const QNetworkInterface& networkInterface,
                      QAbstractSocket::NetworkLayerProtocol protocol)
 {
@@ -64,12 +152,81 @@ QString firstAddress(const QNetworkInterface& networkInterface,
     return {};
 }
 
+QString firstUsableIpv4(const QNetworkInterface& networkInterface)
+{
+    for (const auto& entry : networkInterface.addressEntries()) {
+        const QHostAddress address = entry.ip();
+        if (address.protocol() != QAbstractSocket::IPv4Protocol || address.isLoopback())
+            continue;
+
+        const QString ip = address.toString();
+        if (ip.startsWith(QStringLiteral("169.254.")) || ip == QStringLiteral("0.0.0.0"))
+            continue;
+
+        return ip;
+    }
+    return {};
+}
+
+bool isRealActiveNetworkInterface(const QNetworkInterface& networkInterface)
+{
+    return isActiveInterface(networkInterface)
+        && !isVirtualOrTunnelInterface(networkInterface)
+        && !firstUsableIpv4(networkInterface).isEmpty()
+        && !networkInterface.hardwareAddress().isEmpty();
+}
+
+int interfacePriority(const QNetworkInterface& networkInterface)
+{
+    const QString name = QStringLiteral("%1 %2")
+        .arg(networkInterface.name(), networkInterface.humanReadableName())
+        .toLower();
+
+    if (name.contains("ethernet") || name.contains(QStringLiteral("以太网")))
+        return 30;
+    if (name.contains("wi-fi") || name.contains("wifi")
+        || name.contains("wlan") || name.contains(QStringLiteral("无线")))
+        return 20;
+    return 10;
+}
+
+std::optional<QNetworkInterface> preferredRealNetworkInterface()
+{
+    const std::optional<quint32> defaultIndex = defaultRouteInterfaceIndex();
+    std::optional<QNetworkInterface> best;
+    int bestPriority = -1;
+
+    for (const auto& networkInterface : QNetworkInterface::allInterfaces()) {
+        if (!isRealActiveNetworkInterface(networkInterface))
+            continue;
+
+        if (defaultIndex.has_value()
+            && static_cast<quint32>(networkInterface.index()) == defaultIndex.value()) {
+            spdlog::debug("TerminalInfoProvider: selected default-route interface='{}'",
+                networkInterface.humanReadableName().toStdString());
+            return networkInterface;
+        }
+
+        const int priority = interfacePriority(networkInterface);
+        if (!best.has_value() || priority > bestPriority) {
+            best = networkInterface;
+            bestPriority = priority;
+        }
+    }
+
+    return best;
+}
+
 } // namespace
+
+QString TerminalInfoSnapshot::hardwareCode() const
+{
+    return payload.value("pcInfo").toObject().value("hardwareCode").toString();
+}
 
 TerminalInfoSnapshot TerminalInfoProvider::collect()
 {
     TerminalInfoSnapshot snapshot;
-    snapshot.hardwareCode = hardwareCode();
     snapshot.payload = {
         { "terminalIp", terminalIp() },
         { "clientVersion", QCoreApplication::applicationVersion() },
@@ -85,14 +242,26 @@ TerminalInfoSnapshot TerminalInfoProvider::collect()
 
 QString TerminalInfoProvider::hardwareCode()
 {
-    QByteArray source = QSysInfo::machineUniqueId();
-    if (source.isEmpty()) {
-        spdlog::warn("TerminalInfoProvider: machineUniqueId unavailable, using fallback identity");
-        source = QStringLiteral("%1|%2|%3")
-                     .arg(terminalName(), manufacturer(), model())
-                     .toUtf8();
+    QStringList stableParts;
+
+    const QByteArray machineId = QSysInfo::machineUniqueId();
+    if (!machineId.isEmpty())
+        stableParts << QString::fromLatin1(machineId.toHex());
+    else {
+		stableParts << serialNumber()
+			<< manufacturer()
+			<< model()
+			<< motherboard()
+			<< cpuModel();
+	}
+
+    stableParts.removeAll(QString{});
+    if (stableParts.isEmpty()) {
+        spdlog::error("TerminalInfoProvider: no stable hardware identity is available");
+        return {};
     }
 
+    const QByteArray source = stableParts.join('|').toUtf8();
     if (source.isEmpty()) {
         spdlog::error("TerminalInfoProvider: no stable hardware identity is available");
         return {};
@@ -145,7 +314,7 @@ QJsonArray TerminalInfoProvider::collectNetworkInfo()
         result.append(QJsonObject{
             { "networkCardName", interfaceName },
             { "mac", networkInterface.hardwareAddress() },
-            { "ipv4", firstAddress(networkInterface, QAbstractSocket::IPv4Protocol) },
+            { "ipv4", firstUsableIpv4(networkInterface) },
             { "ipv6", firstAddress(networkInterface, QAbstractSocket::IPv6Protocol) },
             { "defaultGateway", defaultGatewayForInterface(interfaceName) },
             { "dns", dnsForInterface(interfaceName) },
@@ -159,13 +328,16 @@ QJsonArray TerminalInfoProvider::collectNetworkInfo()
 
 QString TerminalInfoProvider::terminalIp()
 {
-    for (const auto& networkInterface : QNetworkInterface::allInterfaces()) {
-        if (!isActiveInterface(networkInterface))
-            continue;
-        const QString ipv4 = firstAddress(networkInterface, QAbstractSocket::IPv4Protocol);
-        if (!ipv4.isEmpty())
-            return ipv4;
+    const auto selectedInterface = preferredRealNetworkInterface();
+    if (selectedInterface.has_value()) {
+        const QString ip = firstUsableIpv4(selectedInterface.value());
+        spdlog::debug("TerminalInfoProvider: selected terminalIp='{}' from interface='{}'",
+            ip.toStdString(),
+            selectedInterface->humanReadableName().toStdString());
+        return ip;
     }
+
+    spdlog::warn("TerminalInfoProvider: no real active network interface with IPv4 found");
     return {};
 }
 
@@ -253,11 +425,8 @@ QString TerminalInfoProvider::motherboard()
 
 QString TerminalInfoProvider::primaryMac()
 {
-    for (const auto& networkInterface : QNetworkInterface::allInterfaces()) {
-        if (isActiveInterface(networkInterface) && !networkInterface.hardwareAddress().isEmpty())
-            return networkInterface.hardwareAddress();
-    }
-    return {};
+    const auto selectedInterface = preferredRealNetworkInterface();
+    return selectedInterface.has_value() ? selectedInterface->hardwareAddress() : QString{};
 }
 
 QString TerminalInfoProvider::virtualMachineStatus()
