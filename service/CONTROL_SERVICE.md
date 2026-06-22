@@ -9,6 +9,8 @@
   `\\.\pipe\XyreController.v1`.
 - The controller creates, starts, stops, and removes per-tunnel
   `XyGuardTunnel$...` services.
+- WireGuard driver access and traffic-counter reads run only inside the
+  controller service. The app requests `traffic` by validated adapter alias.
 - `xyreService.exe install-controller` is the only operation launched with the
   `runas` verb. It is used only when `XyreController` is not installed.
 
@@ -20,6 +22,7 @@
   reconfigure, or delete it.
 - Requests use a versioned JSON protocol and are limited to 64 KiB.
 - Client and server pipe operations are cancellable and time bounded.
+- A protocol-version mismatch triggers an elevated controller upgrade and restart.
 
 ## Deployment Requirements
 

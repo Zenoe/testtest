@@ -1,5 +1,6 @@
 #include "StatusPanel.h"
-#include "Driver.h"
+#include "backend/ControlServiceClient.h"
+#include "RingLogDialog.h"
 
 #include <QApplication>
 #include <QGraphicsDropShadowEffect>
@@ -8,70 +9,131 @@
 #include <QFrame>
 #include <QScreen>
 #include <QShowEvent>
+#include <QDateTime>
+#include <QStyle>
 
 #include <spdlog/spdlog.h>
-#include <stdexcept>
 
 static const char* kStyle = R"(
+QWidget#statusPanelRoot {
+    background: transparent;
+}
+QWidget#statusContainer {
+    background: #FFFFFF;
+    border: 1px solid #DDE3EC;
+    border-radius: 14px;
+}
 QLabel#heading {
-    color: rgba(180, 180, 220, 0.9);
-    font: 500 10px "Segoe UI", "SF Pro Text", "Consolas";
-    letter-spacing: 2px;
+    color: #172033;
+    font-size: 17px;
+    font-weight: 700;
 }
-QLabel#metricKey {
-    color: rgba(150, 150, 200, 0.9);
-    font: 9px "Segoe UI", "SF Pro Text", "Consolas";
-    letter-spacing: 1.5px;
+QLabel#subtitle {
+    color: #7A8496;
+    font-size: 11px;
 }
-QLabel#rxValue {
-    color: #6ee847;
-    font: 600 22px "Segoe UI", "SF Pro Display", "Consolas";
+QLabel#statusBadge {
+    border-radius: 10px;
+    padding: 3px 9px;
+    font-size: 11px;
+    font-weight: 600;
 }
-QLabel#txValue {
-    color: #4d9fff;
-    font: 600 22px "Segoe UI", "SF Pro Display", "Consolas";
+QLabel#statusBadge[state="online"] {
+    color: #137333;
+    background: #E6F4EA;
 }
-QLabel#status {
-    color: rgba(255, 100, 100, 0.85);
-    font: 10px "Segoe UI", "SF Pro Text", "Consolas";
-    letter-spacing: 0.5px;
+QLabel#statusBadge[state="waiting"] {
+    color: #8A5A00;
+    background: #FFF4D6;
+}
+QLabel#statusBadge[state="offline"] {
+    color: #B3261E;
+    background: #FCE8E6;
+}
+QFrame#metricCard {
+    background: #F7F9FC;
+    border: 1px solid #E8ECF2;
+    border-radius: 10px;
+}
+QLabel#metricKey, QLabel#detailKey {
+    color: #7A8496;
+    font-size: 10px;
+    font-weight: 600;
+}
+QLabel#rxValue, QLabel#txValue {
+    color: #172033;
+    font-size: 20px;
+    font-weight: 700;
+}
+QLabel#metricAccentRx {
+    color: #18864B;
+    font-size: 14px;
+    font-weight: 700;
+}
+QLabel#metricAccentTx {
+    color: #2468F2;
+    font-size: 14px;
+    font-weight: 700;
+}
+QLabel#handshakeValue {
+    color: #27344D;
+    font-size: 12px;
+    font-weight: 600;
 }
 QFrame#hline {
-    background: qlineargradient(
-        x1:0, y1:0, x2:1, y2:0,
-        stop:0 transparent,
-        stop:0.5 rgba(120, 120, 200, 0.25),
-        stop:1 transparent
-    );
+    background: #E8ECF2;
     max-height: 1px;
     border: none;
 }
 QPushButton#closeBtn {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    color: rgba(180, 180, 220, 0.6);
-    font: 600 14px "Segoe UI", "SF Pro Text";
+    min-width: 0;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    background: transparent;
+    border: none;
+    color: #7A8496;
+    font-size: 16px;
+    font-weight: 600;
     padding: 0;
-    border-radius: 6px;
+    border-radius: 8px;
 }
 QPushButton#closeBtn:hover {
-    color: #ffffff;
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.18);
+    color: #172033;
+    background: #EEF2F7;
 }
 QPushButton#closeBtn:pressed {
-    background: rgba(255, 255, 255, 0.16);
+    background: #E3E8F0;
+}
+QPushButton#logButton {
+    min-width: 0;
+    min-height: 32px;
+    max-height: 32px;
+    color: #2468F2;
+    background: #F0F5FF;
+    border: 1px solid #C9D9FA;
+    border-radius: 8px;
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 600;
+}
+QPushButton#logButton:hover {
+    color: #1848B8;
+    background: #E4EDFF;
+    border-color: #9CB9F5;
 }
 )";
-StatusPanel::StatusPanel(const QString& configFile, QWidget* parent)
+StatusPanel::StatusPanel(const QString& adapterName, const QString& configPath, QWidget* parent)
     : QWidget(parent, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint)
-    , m_configFile(configFile)
+    , m_adapterName(adapterName)
+    , m_configPath(configPath)
 {
-    //setAttribute(Qt::WA_TranslucentBackground);
+    setObjectName("statusPanelRoot");
+    setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose, false);
     setStyleSheet(kStyle);
     buildUi();
-    setFixedSize(280, 180);
+    setFixedSize(360, 315);
 }
 
 StatusPanel::~StatusPanel()
@@ -144,37 +206,59 @@ void StatusPanel::keyPressEvent(QKeyEvent* event)
 // ---- buildUi ----------------------------------------------------------------
 void StatusPanel::buildUi()
 {
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(12, 12, 12, 16);
+
     auto* container = new QWidget(this);
     container->setObjectName("statusContainer");
-    container->setStyleSheet(R"(
-    #statusContainer {
-        background-color: #eeeeee;
-        border-radius: 4px;
-        border: 1px solid #DCDCDC;
-    }
-)");
-    container->setFixedSize(280, 180);
-    //root0->addWidget(container);
+    outer->addWidget(container);
 
     auto* root = new QVBoxLayout(container);
-    root->setSpacing(8);
+    root->setContentsMargins(18, 16, 18, 16);
+    root->setSpacing(12);
 
     // ── Title row ──────────────────────────────────────────────
     {
         auto* row = new QHBoxLayout;
-        row->setSpacing(0);
+        row->setSpacing(10);
 
-        auto* title = new QLabel("STATUS STATS", container);
+        auto* titleColumn = new QVBoxLayout;
+        titleColumn->setSpacing(2);
+
+        auto* title = new QLabel("VPN status", container);
         title->setObjectName("heading");
+        auto* subtitle = new QLabel(m_adapterName, container);
+        subtitle->setObjectName("subtitle");
+        subtitle->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        titleColumn->addWidget(title);
+        titleColumn->addWidget(subtitle);
 
-        auto* closeBtn = new QPushButton("✕", container);
+        m_statusLabel = new QLabel("Connecting", container);
+        m_statusLabel->setObjectName("statusBadge");
+        m_statusLabel->setProperty("state", "waiting");
+
+        auto* closeBtn = new QPushButton(QString::fromUtf8("\xC3\x97"), container);
         closeBtn->setObjectName("closeBtn");
-        closeBtn->setFixedSize(24, 24);
+        closeBtn->setToolTip("Close");
         connect(closeBtn, &QPushButton::clicked, this, &StatusPanel::toggle);
 
-        row->addWidget(title);
+        row->addLayout(titleColumn);
         row->addStretch();
+        row->addWidget(m_statusLabel, 0, Qt::AlignTop);
         row->addWidget(closeBtn);
+        root->addLayout(row);
+    }
+
+    {
+        auto* row = new QHBoxLayout;
+        auto* hint = new QLabel("Controller and tunnel diagnostics", container);
+        hint->setObjectName("subtitle");
+        auto* logButton = new QPushButton("View diagnostic log", container);
+        logButton->setObjectName("logButton");
+        connect(logButton, &QPushButton::clicked, this, &StatusPanel::showRingLog);
+        row->addWidget(hint);
+        row->addStretch();
+        row->addWidget(logButton);
         root->addLayout(row);
     }
 
@@ -191,57 +275,59 @@ void StatusPanel::buildUi()
     // ── Metrics ────────────────────────────────────────────────
     {
         auto* metricsRow = new QHBoxLayout;
-        metricsRow->setSpacing(24);
+        metricsRow->setSpacing(10);
 
-        // RX
-        {
-            auto* col = new QVBoxLayout;
-            auto* key = new QLabel("RECEIVED", container);
+        auto makeMetric = [container](const QString& arrow, const QString& title,
+                                      const char* accentName, QLabel*& value) {
+            auto* card = new QFrame(container);
+            card->setObjectName("metricCard");
+            auto* layout = new QVBoxLayout(card);
+            layout->setContentsMargins(12, 10, 12, 10);
+            layout->setSpacing(4);
+
+            auto* headingRow = new QHBoxLayout;
+            auto* accent = new QLabel(arrow, card);
+            accent->setObjectName(accentName);
+            auto* key = new QLabel(title, card);
             key->setObjectName("metricKey");
+            headingRow->addWidget(accent);
+            headingRow->addWidget(key);
+            headingRow->addStretch();
 
-            m_rxValue = new QLabel("0", container);
-            m_rxValue->setObjectName("rxValue");
-            m_rxValue->setAlignment(Qt::AlignLeft);
+            value = new QLabel("0 B", card);
+            value->setObjectName(title == "RECEIVED" ? "rxValue" : "txValue");
+            layout->addLayout(headingRow);
+            layout->addWidget(value);
+            return card;
+        };
 
-            col->addWidget(key);
-            col->addWidget(m_rxValue);
-            metricsRow->addLayout(col);
-        }
-
-        metricsRow->addStretch();
-
-        // TX
-        {
-            auto* col = new QVBoxLayout;
-            auto* key = new QLabel("SENT", container);
-            key->setObjectName("metricKey");
-
-            m_txValue = new QLabel("0", container);
-            m_txValue->setObjectName("txValue");
-            m_txValue->setAlignment(Qt::AlignRight);
-
-            col->addWidget(key);
-            col->addWidget(m_txValue);
-            metricsRow->addLayout(col);
-        }
-
+        metricsRow->addWidget(makeMetric(QString::fromUtf8("\xE2\x86\x93"), "RECEIVED",
+                                         "metricAccentRx", m_rxValue), 1);
+        metricsRow->addWidget(makeMetric(QString::fromUtf8("\xE2\x86\x91"), "SENT",
+                                         "metricAccentTx", m_txValue), 1);
         root->addLayout(metricsRow);
     }
 
     root->addWidget(makeLine());
 
     {
-        m_statusLabel = new QLabel("● Connecting", container);
-        m_statusLabel->setObjectName("status");
-        m_statusLabel->setAlignment(Qt::AlignCenter);
-        root->addWidget(m_statusLabel);
+        auto* row = new QHBoxLayout;
+        auto* key = new QLabel("LAST HANDSHAKE", container);
+        key->setObjectName("detailKey");
+        m_handshakeValue = new QLabel("Waiting for peer", container);
+        m_handshakeValue->setObjectName("handshakeValue");
+        m_handshakeValue->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        row->addWidget(key);
+        row->addStretch();
+        row->addWidget(m_handshakeValue);
+        root->addLayout(row);
     }
 
     // ── Shadow ─────────────────────────────────────────────────
     auto* shadow = new QGraphicsDropShadowEffect(container);
-    shadow->setBlurRadius(20);
-    shadow->setOffset(0, 4);
-    shadow->setColor(QColor(0, 0, 0, 60));
+    shadow->setBlurRadius(28);
+    shadow->setOffset(0, 6);
+    shadow->setColor(QColor(23, 32, 51, 45));
     container->setGraphicsEffect(shadow);
 }
 
@@ -252,7 +338,7 @@ void StatusPanel::startPoller()
         return;   // already running
 
     m_thread = new QThread(this);
-    m_poller = new StatusPoller(m_configFile);   // no Qt parent — moved to thread
+    m_poller = new StatusPoller(m_adapterName);   // no Qt parent — moved to thread
     m_poller->moveToThread(m_thread);
 
     // Poller → panel  (queued: crosses thread boundary automatically)
@@ -296,18 +382,45 @@ void StatusPanel::stopPoller()
 }
 
 // ---- slots ------------------------------------------------------------------
-void StatusPanel::onStats(quint64 rx, quint64 tx)
+void StatusPanel::onStats(quint64 rx, quint64 tx, qint64 lastHandshakeMsec)
 {
     m_rxValue->setText(formatBytes(rx));
     m_txValue->setText(formatBytes(tx));
-    m_statusLabel->clear();
+    m_handshakeValue->setText(formatHandshake(lastHandshakeMsec));
+
+    if (lastHandshakeMsec <= 0) {
+        m_handshakeValue->setToolTip("No successful handshake has been recorded");
+        setConnectionState("Waiting for peer", "waiting");
+        return;
+    }
+
+    const QDateTime handshake = QDateTime::fromMSecsSinceEpoch(lastHandshakeMsec);
+    m_handshakeValue->setToolTip(
+        QStringLiteral("Last handshake: %1").arg(handshake.toString(Qt::TextDate)));
+    const qint64 elapsedSeconds =
+        qMax<qint64>(0, handshake.secsTo(QDateTime::currentDateTime()));
+    setConnectionState(elapsedSeconds <= 180 ? "Connected" : "Handshake stale",
+                       elapsedSeconds <= 180 ? "online" : "waiting");
 }
 
 void StatusPanel::onError(const QString& msg)
 {
     m_rxValue->setText("—");
     m_txValue->setText("—");
-    m_statusLabel->setText(msg.isEmpty() ? "Adapter unavailable" : msg);
+    m_handshakeValue->setText("Unavailable");
+    m_handshakeValue->setToolTip(msg);
+    setConnectionState("Unavailable", "offline");
+}
+
+void StatusPanel::showRingLog()
+{
+    if (!m_ringLogDialog) {
+        QWidget* owner = parentWidget() ? parentWidget() : this;
+        m_ringLogDialog = new RingLogDialog(m_configPath, owner);
+    }
+    m_ringLogDialog->show();
+    m_ringLogDialog->raise();
+    m_ringLogDialog->activateWindow();
 }
 
 // ---- formatBytes ------------------------------------------------------------
@@ -326,13 +439,39 @@ QString StatusPanel::formatBytes(quint64 bytes)
     return QString::number(bytes) + " B";
 }
 
+QString StatusPanel::formatHandshake(qint64 lastHandshakeMsec)
+{
+    if (lastHandshakeMsec <= 0)
+        return QStringLiteral("Never");
+
+    const QDateTime handshake = QDateTime::fromMSecsSinceEpoch(lastHandshakeMsec);
+    const qint64 elapsed = qMax<qint64>(0, handshake.secsTo(QDateTime::currentDateTime()));
+    if (elapsed < 5)
+        return QStringLiteral("Just now");
+    if (elapsed < 60)
+        return QStringLiteral("%1 sec ago").arg(elapsed);
+    if (elapsed < 3600)
+        return QStringLiteral("%1 min ago").arg(elapsed / 60);
+    if (elapsed < 86400)
+        return QStringLiteral("%1 hr ago").arg(elapsed / 3600);
+    return QStringLiteral("%1 days ago").arg(elapsed / 86400);
+}
+
+void StatusPanel::setConnectionState(const QString& text, const QString& state)
+{
+    m_statusLabel->setText(text);
+    m_statusLabel->setProperty("state", state);
+    m_statusLabel->style()->unpolish(m_statusLabel);
+    m_statusLabel->style()->polish(m_statusLabel);
+}
+
 
 // ============================================================
 //  StatusPoller
 // ============================================================
-StatusPoller::StatusPoller(const QString& configFile, QObject* parent)
+StatusPoller::StatusPoller(const QString& adapterName, QObject* parent)
     : QObject(parent)
-    , m_configFile(configFile)
+    , m_adapterName(adapterName)
 {
 }
 
@@ -365,55 +504,36 @@ void StatusPoller::stop()
         m_timer = nullptr;
     }
 }
-#include <QDateTime>
-QString StatusPoller::formatHandshake(quint64 lastHandshakeMsec) {
-    if (lastHandshakeMsec == 0)
-        return QObject::tr("Never");
-
-    quint64 nowMsec = static_cast<quint64>(
-        QDateTime::currentMSecsSinceEpoch());
-    quint64 elapsedSec = (nowMsec - lastHandshakeMsec) / 1000;
-
-    quint64 days    = elapsedSec / 86400;
-    quint64 hours   = (elapsedSec % 86400) / 3600;
-    quint64 minutes = (elapsedSec % 3600) / 60;
-    quint64 seconds = elapsedSec % 60;
-
-    QString result;
-    if (days > 0)
-        result += QString("%1 天%2, ").arg(days).arg(days == 1 ? "" : "s");
-    if (hours > 0)
-        result += QString("%1 时%2, ").arg(hours).arg(hours == 1 ? "" : "s");
-    if (minutes > 0)
-        result += QString("%1 分%2, ").arg(minutes).arg(minutes == 1 ? "" : "s");
-    result += QString("%1 秒%2").arg(seconds).arg(seconds == 1 ? "" : "s");
-
-    return result;
-    //return result + QObject::tr(" 前");
-}
 void StatusPoller::poll()
 {
     if (!m_running)
         return;
 
-    try {
-        auto adapter = Tunnel::Driver::Adapter::open(m_configFile.toStdWString());
-        const Tunnel::Interface cfg = adapter.getConfiguration();
-
-        quint64 rx = 0, tx = 0, lastHandshake=0;
-        // only one peer for a client
-        for (const auto& peer : cfg.peers) {
-            rx += static_cast<quint64>(peer.rxBytes);
-            tx += static_cast<quint64>(peer.txBytes);
-            // Most recent handshake across all peers (tunnel is "alive" if any peer is active)
-            lastHandshake = (std::max)(lastHandshake, static_cast<quint64>(peer.lastHandshakeMsec));
+    const TrafficStatsResponse response =
+        ControlServiceClient::queryTraffic(m_adapterName, 2'000);
+    if (response.ok) {
+        if (m_consecutiveFailures > 0) {
+            spdlog::info(
+                "StatusPoller: traffic polling recovered | adapter={} failures={}",
+                m_adapterName.toStdString(), m_consecutiveFailures);
         }
+        m_consecutiveFailures = 0;
+        m_lastError.clear();
+        emit statsReady(response.rxBytes, response.txBytes, response.lastHandshakeMsec);
+        return;
+    }
 
-        //spdlog::debug("lastHandshakeMsec: {}", formatHandshake(lastHandshake).toStdString());
-        emit statsReady(rx, tx);
+    ++m_consecutiveFailures;
+    const QString detail = response.detail.isEmpty()
+        ? QStringLiteral("Adapter unavailable")
+        : response.detail;
+    if (m_consecutiveFailures == 1
+        || m_consecutiveFailures % 30 == 0
+        || detail != m_lastError) {
+        spdlog::warn(
+            "StatusPoller: traffic poll failed | adapter={} failures={} error={}",
+            m_adapterName.toStdString(), m_consecutiveFailures, detail.toStdString());
     }
-    catch (const std::exception& ex) {
-        emit errorOccurred(QString::fromStdString(ex.what()));
-        spdlog::debug("StatusPoller::poll failed: {}", ex.what());
-    }
+    m_lastError = detail;
+    emit errorOccurred(detail);
 }

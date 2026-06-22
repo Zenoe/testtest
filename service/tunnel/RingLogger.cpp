@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <stdexcept>
@@ -67,52 +68,58 @@ std::string Ringlogger::lineToString(const RawLine& l) {
     return formatTimestamp(l.timestampNs) + ": " + std::string(l.text, len);
 }
 
-void Ringlogger::initMapping(const char* path) {
-    // Open or create the backing file
-    m_file = ::CreateFileA(
+void Ringlogger::initMapping(const wchar_t* path, bool readOnly) {
+    m_file = ::CreateFileW(
         path,
-        GENERIC_READ | GENERIC_WRITE,
+        readOnly ? GENERIC_READ : (GENERIC_READ | GENERIC_WRITE),
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr,
-        OPEN_ALWAYS,
+        readOnly ? OPEN_EXISTING : OPEN_ALWAYS,
         FILE_ATTRIBUTE_NORMAL,
         nullptr);
 
     if (m_file == INVALID_HANDLE_VALUE)
-        throwLastError("Ringlogger: CreateFileA");
+        throwLastError("Ringlogger: CreateFileW");
 
-    // Ensure the file is exactly kTotalBytes
-    LARGE_INTEGER size{};
-    size.QuadPart = static_cast<LONGLONG>(kTotalBytes);
-    if (!::SetFilePointerEx(m_file, size, nullptr, FILE_BEGIN) ||
-        !::SetEndOfFile(m_file))
-    {
-        throwLastError("Ringlogger: SetFileLength");
+    if (readOnly) {
+        LARGE_INTEGER size{};
+        if (!::GetFileSizeEx(m_file, &size))
+            throwLastError("Ringlogger: GetFileSizeEx");
+        if (size.QuadPart != static_cast<LONGLONG>(kTotalBytes))
+            throw std::runtime_error("Ringlogger: invalid file size");
+    }
+    else {
+        LARGE_INTEGER size{};
+        size.QuadPart = static_cast<LONGLONG>(kTotalBytes);
+        if (!::SetFilePointerEx(m_file, size, nullptr, FILE_BEGIN) ||
+            !::SetEndOfFile(m_file)) {
+            throwLastError("Ringlogger: SetFileLength");
+        }
     }
 
-    // Create a named/anonymous mapping (no name needed — we keep the handle)
-    m_mapping = ::CreateFileMappingA(
+    m_mapping = ::CreateFileMappingW(
         m_file,
         nullptr,
-        PAGE_READWRITE,
+        readOnly ? PAGE_READONLY : PAGE_READWRITE,
         0,
         static_cast<DWORD>(kTotalBytes),
         nullptr);
 
     if (!m_mapping)
-        throwLastError("Ringlogger: CreateFileMappingA");
+        throwLastError("Ringlogger: CreateFileMappingW");
 
     m_view = static_cast<uint8_t*>(
-        ::MapViewOfFile(m_mapping, FILE_MAP_ALL_ACCESS, 0, 0, kTotalBytes));
+        ::MapViewOfFile(m_mapping, readOnly ? FILE_MAP_READ : FILE_MAP_ALL_ACCESS,
+                        0, 0, kTotalBytes));
 
     if (!m_view)
         throwLastError("Ringlogger: MapViewOfFile");
 
-    // Initialise if the magic doesn't match (fresh file or corrupt)
     if (header()->magic != kMagic) {
+        if (readOnly)
+            throw std::runtime_error("Ringlogger: invalid file magic");
         ::memset(m_view, 0, kTotalBytes);
         header()->magic = kMagic;
-        // nextIndex already 0 from memset; no explicit write needed
     }
 }
 
@@ -139,11 +146,18 @@ void Ringlogger::closeMapping() noexcept {
 //  Constructor / destructor
 // ================================================================
 
-Ringlogger::Ringlogger(std::string_view filename, std::string_view tag)
-    : m_tag(tag)
+Ringlogger::Ringlogger(std::wstring_view filename, std::string_view tag, bool readOnly)
+    : m_tag(tag),
+      m_readOnly(readOnly)
 {
-    const std::string path(filename);
-    initMapping(path.c_str());
+    const std::wstring path(filename);
+    try {
+        initMapping(path.c_str(), readOnly);
+    }
+    catch (...) {
+        closeMapping();
+        throw;
+    }
 }
 
 Ringlogger::~Ringlogger() {
@@ -151,6 +165,9 @@ Ringlogger::~Ringlogger() {
 }
 
 void Ringlogger::write(std::string_view line) const {
+    if (m_readOnly)
+        throw std::logic_error("Ringlogger: cannot write through a read-only mapping");
+
     const int64_t now = unixNanosNow();
 
     // Build "[tag] <trimmed line>"

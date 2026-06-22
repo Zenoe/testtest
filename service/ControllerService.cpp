@@ -1,18 +1,25 @@
+#include "Driver.h"
+#include "RingLogStore.h"
 #include "ControllerService.h"
-
 #include "service.h"
 #include "slogger.h"
 #include "../common/ControlProtocol.h"
 #include "../common/ExitCodes.h"
 
+#include <QElapsedTimer>
 #include <QFileInfo>
+#include <QHash>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 
 #include <Windows.h>
 #include <sddl.h>
 
+#include <algorithm>
+#include <filesystem>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -20,6 +27,12 @@ namespace {
 SERVICE_STATUS_HANDLE g_statusHandle = nullptr;
 SERVICE_STATUS g_status{};
 HANDLE g_stopEvent = nullptr;
+
+struct TrafficFailureState {
+    quint32 count = 0;
+    QString detail;
+};
+QHash<QString, TrafficFailureState> g_trafficFailures;
 
 class ScopedHandle {
 public:
@@ -81,6 +94,129 @@ QString tunnelServiceName(const QString& configPath) {
     return QStringLiteral("XyGuardTunnel$") + QFileInfo(configPath).baseName();
 }
 
+bool isValidAdapterName(const QString& adapterName) {
+    if (adapterName.isEmpty() || adapterName.size() > 128
+        || adapterName != adapterName.trimmed()) {
+        return false;
+    }
+    for (const QChar ch : adapterName) {
+        if (ch.isNull() || !ch.isPrint() || ch == '/' || ch == '\\')
+            return false;
+    }
+    return true;
+}
+
+bool isManagedTunnelRunning(const QString& adapterName) {
+    const QString serviceName = QStringLiteral("XyGuardTunnel$") + adapterName;
+    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!scm)
+        return false;
+
+    SC_HANDLE service = OpenServiceW(
+        scm, reinterpret_cast<LPCWSTR>(serviceName.utf16()), SERVICE_QUERY_STATUS);
+    if (!service) {
+        CloseServiceHandle(scm);
+        return false;
+    }
+
+    SERVICE_STATUS_PROCESS status{};
+    DWORD bytesNeeded = 0;
+    const bool running = QueryServiceStatusEx(
+        service,
+        SC_STATUS_PROCESS_INFO,
+        reinterpret_cast<LPBYTE>(&status),
+        sizeof(status),
+        &bytesNeeded)
+        && status.dwCurrentState == SERVICE_RUNNING;
+    CloseServiceHandle(service);
+    CloseServiceHandle(scm);
+    return running;
+}
+
+QByteArray trafficResponse(const QString& adapterName) {
+    QElapsedTimer timer;
+    timer.start();
+    try {
+        auto adapter = Tunnel::Driver::Adapter::open(adapterName.toStdWString());
+        const Tunnel::Interface config = adapter.getConfiguration();
+
+        quint64 rxBytes = 0;
+        quint64 txBytes = 0;
+        qint64 lastHandshakeMsec = 0;
+        for (const Tunnel::Peer& peer : config.peers) {
+            if (std::numeric_limits<quint64>::max() - rxBytes < peer.rxBytes
+                || std::numeric_limits<quint64>::max() - txBytes < peer.txBytes) {
+                throw std::overflow_error("traffic counter overflow");
+            }
+            rxBytes += peer.rxBytes;
+            txBytes += peer.txBytes;
+            lastHandshakeMsec = (std::max)(lastHandshakeMsec, peer.lastHandshakeMsec);
+        }
+
+        spdlog::trace(
+            "[Controller] traffic | adapter={} peers={} rx={} tx={} elapsedMs={}",
+            adapterName.toStdString(), config.peers.size(), rxBytes, txBytes, timer.elapsed());
+        const auto failure = g_trafficFailures.take(adapterName);
+        if (failure.count > 0) {
+            spdlog::info(
+                "[Controller] traffic recovered | adapter={} failures={}",
+                adapterName.toStdString(), failure.count);
+        }
+        return QJsonDocument(QJsonObject{
+            { "ok", true },
+            { "code", XyreExitCode::Ok },
+            { "win32", 0 },
+            { "detail", QString{} },
+            { "adapterName", adapterName },
+            { "rxBytes", QString::number(rxBytes) },
+            { "txBytes", QString::number(txBytes) },
+            { "lastHandshakeMsec", QString::number(lastHandshakeMsec) },
+            { "version", XyreControl::kProtocolVersion }
+        }).toJson(QJsonDocument::Compact);
+    }
+    catch (const std::exception& ex) {
+        const QString detail = QString::fromUtf8(ex.what());
+        TrafficFailureState& failure = g_trafficFailures[adapterName];
+        ++failure.count;
+        if (failure.count == 1 || failure.count % 30 == 0 || failure.detail != detail) {
+            spdlog::warn(
+                "[Controller] traffic failed | adapter={} failures={} elapsedMs={} error={}",
+                adapterName.toStdString(), failure.count, timer.elapsed(), ex.what());
+        }
+        failure.detail = detail;
+        return errorResponse(detail, XyreExitCode::UnexpectedError);
+    }
+}
+
+QByteArray ringLogResponse(const QString& configPath) {
+    const QFileInfo config(configPath);
+    if (configPath.isEmpty() || !config.isAbsolute())
+        return errorResponse(QStringLiteral("invalid config path for ring log"));
+
+    try {
+        QJsonArray lines;
+        for (const std::string& line :
+             Tunnel::readRingLog(std::filesystem::path(config.absoluteFilePath().toStdWString()),
+                                 100, 48 * 1024)) {
+            lines.append(QString::fromUtf8(line.data(), static_cast<qsizetype>(line.size())));
+        }
+
+        return QJsonDocument(QJsonObject{
+            { "ok", true },
+            { "code", XyreExitCode::Ok },
+            { "win32", 0 },
+            { "detail", QString{} },
+            { "lines", lines },
+            { "version", XyreControl::kProtocolVersion }
+        }).toJson(QJsonDocument::Compact);
+    }
+    catch (const std::exception& ex) {
+        return errorResponse(
+            QStringLiteral("failed to read ring log: %1").arg(QString::fromUtf8(ex.what())),
+            XyreExitCode::UnexpectedError);
+    }
+}
+
 QByteArray dispatch(const QByteArray& bytes) {
     QJsonParseError parseError{};
     const QJsonDocument document = QJsonDocument::fromJson(bytes, &parseError);
@@ -88,12 +224,37 @@ QByteArray dispatch(const QByteArray& bytes) {
         return errorResponse(QStringLiteral("invalid JSON request"));
 
     const QJsonObject request = document.object();
-    if (request.value("version").toInt() != XyreControl::kProtocolVersion)
+    if (request.value("version").toInt() != XyreControl::kProtocolVersion) {
+        spdlog::warn("[Controller] rejected unsupported protocol version");
         return errorResponse(QStringLiteral("unsupported protocol version"));
+    }
 
     const QString command = request.value("command").toString();
+    if (command == QStringLiteral("traffic") || command == QStringLiteral("ping")
+        || command == QStringLiteral("ringlog"))
+        spdlog::trace("[Controller] request | command={}", command.toStdString());
+    else
+        spdlog::info("[Controller] request | command={}", command.toStdString());
     if (command == QStringLiteral("ping"))
         return responseFor(ServiceResult::success(), true);
+
+    if (command == QStringLiteral("ringlog"))
+        return ringLogResponse(request.value("configPath").toString());
+
+    if (command == QStringLiteral("traffic")) {
+        const QString adapterName = request.value("adapterName").toString();
+        if (!isValidAdapterName(adapterName)) {
+            spdlog::warn("[Controller] rejected invalid traffic adapter name");
+            return errorResponse(QStringLiteral("invalid adapter name"));
+        }
+        if (!isManagedTunnelRunning(adapterName)) {
+            spdlog::debug(
+                "[Controller] traffic unavailable | adapter={} managed tunnel not running",
+                adapterName.toStdString());
+            return errorResponse(QStringLiteral("managed tunnel is not running"));
+        }
+        return trafficResponse(adapterName);
+    }
 
     if (command == QStringLiteral("connect")) {
         const QString configPath = request.value("configPath").toString();
@@ -134,6 +295,7 @@ QByteArray dispatch(const QByteArray& bytes) {
         if (!stopResult.soft())
             return responseFor(stopResult, false, serviceName);
         const ServiceResult removeResult = Tunnel::Service::remove(serviceName);
+        g_trafficFailures.remove(serviceName.mid(QStringLiteral("XyGuardTunnel$").size()));
         return responseFor(removeResult, removeResult.soft(), serviceName);
     }
 
@@ -214,6 +376,41 @@ bool configureControllerDacl(SC_HANDLE service) {
     const BOOL ok = SetServiceObjectSecurity(service, DACL_SECURITY_INFORMATION, descriptor);
     LocalFree(descriptor);
     return ok == TRUE;
+}
+
+ServiceResult stopControllerForUpgrade(SC_HANDLE service) {
+    SERVICE_STATUS_PROCESS status{};
+    DWORD bytesNeeded = 0;
+    if (!QueryServiceStatusEx(
+            service, SC_STATUS_PROCESS_INFO, reinterpret_cast<LPBYTE>(&status),
+            sizeof(status), &bytesNeeded)) {
+        return ServiceResult::fromWin32(GetLastError(), "upgrade controller/query status");
+    }
+    if (status.dwCurrentState == SERVICE_STOPPED)
+        return ServiceResult::success();
+
+    SERVICE_STATUS controlStatus{};
+    if (!ControlService(service, SERVICE_CONTROL_STOP, &controlStatus)
+        && GetLastError() != ERROR_SERVICE_NOT_ACTIVE) {
+        return ServiceResult::fromWin32(GetLastError(), "upgrade controller/stop");
+    }
+
+    const ULONGLONG deadline = GetTickCount64() + 15'000;
+    while (GetTickCount64() < deadline) {
+        if (!QueryServiceStatusEx(
+                service, SC_STATUS_PROCESS_INFO, reinterpret_cast<LPBYTE>(&status),
+                sizeof(status), &bytesNeeded)) {
+            return ServiceResult::fromWin32(GetLastError(), "upgrade controller/wait status");
+        }
+        if (status.dwCurrentState == SERVICE_STOPPED)
+            return ServiceResult::success();
+        Sleep(100);
+    }
+    return {
+        ServiceResult::Status::Failed,
+        ERROR_SERVICE_REQUEST_TIMEOUT,
+        QStringLiteral("timed out stopping controller for upgrade")
+    };
 }
 
 void setServiceState(DWORD state, DWORD win32ExitCode = NO_ERROR, DWORD waitHint = 0) {
@@ -357,11 +554,20 @@ ServiceResult ControllerService::install(const QString& exePath) {
         service = OpenServiceW(
             scm,
             XyreControl::kControllerServiceName,
-            SERVICE_START | SERVICE_QUERY_STATUS | SERVICE_CHANGE_CONFIG | DELETE | WRITE_DAC);
+            SERVICE_START | SERVICE_STOP | SERVICE_QUERY_STATUS
+                | SERVICE_CHANGE_CONFIG | DELETE | WRITE_DAC);
         if (!service) {
             const DWORD openError = GetLastError();
             CloseServiceHandle(scm);
             return ServiceResult::fromWin32(openError, "install controller/OpenService");
+        }
+
+        spdlog::info("[Controller] upgrading installed controller service");
+        const ServiceResult stopResult = stopControllerForUpgrade(service);
+        if (!stopResult.ok()) {
+            CloseServiceHandle(service);
+            CloseServiceHandle(scm);
+            return stopResult;
         }
 
         if (!ChangeServiceConfigW(

@@ -21,7 +21,7 @@ public:
     //  filename – path to the backing file (created if absent)
     //  tag      – prepended to every line as "[tag]"
     // ----------------------------------------------------------------
-    Ringlogger(std::string_view filename, std::string_view tag);
+    Ringlogger(std::wstring_view filename, std::string_view tag, bool readOnly = false);
     ~Ringlogger();
 
     Ringlogger(const Ringlogger&)            = delete;
@@ -105,7 +105,7 @@ private:
     [[nodiscard]] static std::string formatTimestamp(int64_t ns);
     [[nodiscard]] static std::string lineToString(const RawLine& l);
 
-    void initMapping(const char* path);
+    void initMapping(const wchar_t* path, bool readOnly);
     void closeMapping() noexcept;
 
     HANDLE  m_file    = INVALID_HANDLE_VALUE;
@@ -113,6 +113,7 @@ private:
     uint8_t* m_view   = nullptr;
 
     std::string m_tag;
+    bool m_readOnly = false;
 };
 
 } // namespace Tunnel
