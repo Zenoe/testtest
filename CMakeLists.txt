@@ -4,7 +4,6 @@
 # Added a single lib/bin copy with copy_directory — one command covers all DLLs in that folder, no need to enumerate them.
 # Used windeployqt to handle the full Qt runtime, which is more robust than manually finding individual DLLs.
 # Prefixed internal variables with _ (e.g. _qt6_bin_dir) to avoid polluting the cache.
-
 cmake_minimum_required(VERSION 3.24)
 project(Revelation VERSION 1.0 LANGUAGES CXX)
 
