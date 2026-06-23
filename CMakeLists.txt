@@ -1,10 +1,9 @@
-﻿# Added CMAKE_CXX_STANDARD_REQUIRED ON and EXTENSIONS OFF — best practice to prevent silent fallback to a different standard.
+# Added CMAKE_CXX_STANDARD_REQUIRED ON and EXTENSIONS OFF — best practice to prevent silent fallback to a different standard.
 # Replaced set(PLATFORM_SOURCES ...) + separate if blocks with a single if/elseif using list(APPEND COMMON_SOURCES ...) — cleaner, no separate variable needed.
 # Sorted sources into logical groups (ui, backend, utils, models).
 # Added a single lib/bin copy with copy_directory — one command covers all DLLs in that folder, no need to enumerate them.
 # Used windeployqt to handle the full Qt runtime, which is more robust than manually finding individual DLLs.
 # Prefixed internal variables with _ (e.g. _qt6_bin_dir) to avoid polluting the cache.
-
 cmake_minimum_required(VERSION 3.24)
 project(Revelation VERSION 1.0 LANGUAGES CXX)
 
