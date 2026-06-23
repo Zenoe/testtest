@@ -12,15 +12,70 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ── Project build policy ────────────────────────────────────────────────────
+option(REVELATION_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+
+foreach(_config DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    string(TOLOWER "${_config}" _config_lower)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${_config} "${CMAKE_BINARY_DIR}/bin/${_config_lower}")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${_config} "${CMAKE_BINARY_DIR}/lib/${_config_lower}")
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${_config} "${CMAKE_BINARY_DIR}/lib/${_config_lower}")
+endforeach()
+
+function(revelation_configure_target target_name)
+    target_compile_definitions(${target_name} PRIVATE
+        $<$<CONFIG:Debug>:REVELATION_DEBUG_BUILD>
+        $<$<CONFIG:Release>:QT_NO_DEBUG_OUTPUT;QT_NO_INFO_OUTPUT>
+        $<$<CONFIG:RelWithDebInfo>:QT_NO_DEBUG_OUTPUT>
+    )
+
+    if(MSVC)
+        target_compile_options(${target_name} PRIVATE
+            /permissive-
+            /W4
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /MP
+            $<$<CONFIG:Debug>:/Zi>
+            $<$<CONFIG:Debug>:/Od>
+            $<$<CONFIG:Debug>:/RTC1>
+            $<$<CONFIG:Release>:/O2>
+            $<$<CONFIG:RelWithDebInfo>:/O2>
+        )
+
+        target_link_options(${target_name} PRIVATE
+            $<$<CONFIG:Debug>:/DEBUG:FULL>
+            $<$<CONFIG:RelWithDebInfo>:/DEBUG>
+        )
+
+        if(REVELATION_WARNINGS_AS_ERRORS)
+            target_compile_options(${target_name} PRIVATE /WX)
+        endif()
+    else()
+        target_compile_options(${target_name} PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            $<$<CONFIG:Debug>:-Og>
+            $<$<CONFIG:Debug>:-g3>
+            $<$<CONFIG:Release>:-O3>
+            $<$<CONFIG:RelWithDebInfo>:-O2>
+        )
+
+        if(REVELATION_WARNINGS_AS_ERRORS)
+            target_compile_options(${target_name} PRIVATE -Werror)
+        endif()
+    endif()
+endfunction()
+
 # ── Qt automation ────────────────────────────────────────────────────────────
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
-
-# ── Build-type definitions ───────────────────────────────────────────────────
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    add_definitions(-DQT_NO_DEBUG_OUTPUT)
-endif()
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network)
@@ -110,6 +165,8 @@ target_link_libraries(Revelation PRIVATE
     ole32
     shell32
 )
+
+revelation_configure_target(Revelation)
 
 set_target_properties(Revelation PROPERTIES
     WIN32_EXECUTABLE TRUE   # No console window on Windows

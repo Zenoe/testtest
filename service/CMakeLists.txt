@@ -49,18 +49,12 @@ target_link_libraries(xyreService PRIVATE
     spdlog::spdlog
     ws2_32
 )
+
+revelation_configure_target(xyreService)
+
 if(MSVC)
     target_link_options(xyreService PRIVATE "/MANIFESTUAC:level='asInvoker'")
 endif()
-
-# Output all configurations next to Revelation (i.e. the root binary dir)
-set_target_properties(xyreService PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY                "${CMAKE_BINARY_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG          "${CMAKE_BINARY_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE        "${CMAKE_BINARY_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL     "${CMAKE_BINARY_DIR}"
-)
 
 # ── Post-build: copy DLLs (Windows only) ────────────────────────────────────
 # lib/bin DLLs are already copied by the root target (Revelation).

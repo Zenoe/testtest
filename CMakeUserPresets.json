@@ -14,7 +14,10 @@
     {
       "hidden": false,
       "name": "Qt-Debug",
-      "inherits": [ "Qt-Default", "vcpkg" ],
+      "inherits": [
+        "Qt-Default",
+        "vcpkg"
+      ],
       "binaryDir": "${sourceDir}/out/build/debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -27,7 +30,10 @@
     {
       "hidden": false,
       "name": "Qt-Release",
-      "inherits": [ "Qt-Default", "vcpkg" ],
+      "inherits": [
+        "Qt-Default",
+        "vcpkg"
+      ],
       "binaryDir": "${sourceDir}/out/build/release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
